@@ -3,6 +3,13 @@
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
 	  <UseWPF>true</UseWPF>
+	  <Platform>x64</Platform>
+
+	  <Authors>Derek</Authors>
+	  
+	  <!--启动外部程序-->
+	  <StartAction>Program</StartAction>
+	  <StartProgram>C:\Program Files\Autodesk\Revit 2022\Revit.exe</StartProgram>
   </PropertyGroup>
 
   <ItemGroup>
@@ -12,6 +19,21 @@
 
   <ItemGroup>
     <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="Properties\Settings.Designer.cs">
+      <DesignTimeSharedInput>True</DesignTimeSharedInput>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Settings.settings</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Properties\Settings.settings">
+      <Generator>SettingsSingleFileGenerator</Generator>
+      <LastGenOutput>Settings.Designer.cs</LastGenOutput>
+    </None>
   </ItemGroup>
 
 </Project>
