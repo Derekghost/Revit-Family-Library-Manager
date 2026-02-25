@@ -124,6 +124,13 @@
                         </ItemsControl>
                     </ScrollViewer>
 
+                    <Border x:Name="DetailsOverlay"
+                            Background="#B3000000"
+                            Opacity="0"
+                            IsHitTestVisible="False"
+                            Panel.ZIndex="5"
+                            MouseLeftButtonDown="DetailsOverlay_MouseLeftButtonDown"/>
+
                     <Border x:Name="DetailsPanel"
                             Width="320"
                             Padding="12"

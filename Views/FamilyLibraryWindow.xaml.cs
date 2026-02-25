@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Threading;
 using System.Windows.Media.Animation;
+using System.Windows.Input;
 
 namespace RevitFamilyBrowser.Views
 {
@@ -66,20 +67,39 @@ namespace RevitFamilyBrowser.Views
 
         private void UpdateDetailsPanelState(bool animate)
         {
-            var target = (_viewModel != null && _viewModel.IsDetailsPaneOpen) ? 0 : 340;
+            bool isOpen = _viewModel != null && _viewModel.IsDetailsPaneOpen;
+            var target = isOpen ? 0 : 340;
+            var maskOpacity = isOpen ? 0.45 : 0.0;
+
+            DetailsOverlay.IsHitTestVisible = isOpen;
+
             if (!animate)
             {
                 DetailsPanelTransform.X = target;
+                DetailsOverlay.Opacity = maskOpacity;
                 return;
             }
 
-            var ani = new DoubleAnimation
+            var panelAni = new DoubleAnimation
             {
                 To = target,
                 Duration = TimeSpan.FromMilliseconds(220),
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
             };
-            DetailsPanelTransform.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, ani);
+            DetailsPanelTransform.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, panelAni);
+
+            var overlayAni = new DoubleAnimation
+            {
+                To = maskOpacity,
+                Duration = TimeSpan.FromMilliseconds(180)
+            };
+            DetailsOverlay.BeginAnimation(OpacityProperty, overlayAni);
+        }
+
+        private void DetailsOverlay_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if(_viewModel != null && _viewModel.CloseDetailsCommand != null && _viewModel.CloseDetailsCommand.CanExecute(null))
+                _viewModel.CloseDetailsCommand.Execute(null);
         }
 
         protected override void OnClosed(EventArgs e)
