@@ -75,6 +75,33 @@ namespace RevitFamilyBrowser.ViewModels
             }
         }
 
+        private FamilyThumbItemViewModel _selectedFamily;
+        public FamilyThumbItemViewModel SelectedFamily
+        {
+            get => _selectedFamily;
+            private set
+            {
+                if(_selectedFamily == value) return;
+                _selectedFamily = value;
+                OnpropertyChanged();
+            }
+        }
+
+        private bool _isDetailsPaneOpen;
+        public bool IsDetailsPaneOpen
+        {
+            get => _isDetailsPaneOpen;
+            set
+            {
+                if (_isDetailsPaneOpen == value) return;
+                _isDetailsPaneOpen = value;
+                OnpropertyChanged();
+            }
+        }
+
+        public RelayCommand OpenDetailsCommand { get; }
+        public RelayCommand CloseDetailsCommand { get; }
+
         // ✅ 改造点：构造函数参数改成可选（兼容你旧用法：new FamilyLibraryViewModel(@"D:\User\Family")）
         public FamilyLibraryViewModel(string rootPath = null)
         {
@@ -84,6 +111,8 @@ namespace RevitFamilyBrowser.ViewModels
             FamilyFilesView.Filter = FilterFamilyFile;
 
             BrowseRootCommand = new RelayCommand(_ => BrowseForRootFolder());
+            OpenDetailsCommand = new RelayCommand(OpenDetails);
+            CloseDetailsCommand = new RelayCommand(_ => IsDetailsPaneOpen = false);
 
             // ✅ 固定路径（先注释保留，后续想切回直接取消注释即可）
             // SetRootPath(@"D:\User\Family");
@@ -163,9 +192,20 @@ namespace RevitFamilyBrowser.ViewModels
             return item.FileName != null && item.FileName.IndexOf(s, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        private void OpenDetails(object parameter)
+        {
+            var item = parameter as FamilyThumbItemViewModel;
+            if (item == null) return;
+
+            SelectedFamily = item;
+            IsDetailsPaneOpen = true;
+        }
+
         private void RefreshFamilyFiles()
         {
             FamilyFiles.Clear();
+            SelectedFamily = null;
+            IsDetailsPaneOpen = false;
 
             if (_selectedFolder == null)
             {

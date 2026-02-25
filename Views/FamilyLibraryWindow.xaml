@@ -40,7 +40,7 @@
             </DockPanel>
         </Border>
 
-        <!-- 右侧：列表/搜索结果） -->
+        <!-- 右侧：列表/搜索结果 -->
         <Border Grid.Column="1" BorderBrush="#333" BorderThickness="1" Margin="8">
             <Grid Margin="8">
                 <Grid.RowDefinitions>
@@ -74,48 +74,105 @@
                      Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
                 </Grid>
 
-                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-                    <ItemsControl ItemsSource="{Binding FamilyFilesView}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <WrapPanel IsItemsHost="True"/>
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
+                <Grid Grid.Row="2" ClipToBounds="True">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding FamilyFilesView}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel IsItemsHost="True"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
 
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Width="190" Margin="6" Padding="6" BorderBrush="#DDD" BorderThickness="1">
-                                    <StackPanel>
-                                        <Border Height="140" BorderBrush="#EEE" BorderThickness ="1">
-                                            <Image Source="{Binding Thumbnail}"/>
-                                        </Border>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Width="190" Margin="6" Padding="6" BorderBrush="#DDD" BorderThickness="1">
+                                        <StackPanel>
+                                            <Button Height="140"
+                                                    BorderBrush="#EEE"
+                                                    BorderThickness="1"
+                                                    Background="Transparent"
+                                                    Command="{Binding DataContext.OpenDetailsCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}">
+                                                <Image Source="{Binding Thumbnail}"/>
+                                            </Button>
 
-                                        <TextBlock Text="{Binding FileName}"
-                                               Margin="0,6,0,0"
-                                               TextTrimming="CharacterEllipsis"/>
-                                        <Grid Margin="0,6,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="8"/>
-                                                <ColumnDefinition Width="*"/>
-                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding FileName}"
+                                                       Margin="0,6,0,0"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                            <Grid Margin="0,6,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="8"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
 
-                                            <Button Grid.Column="0"
-                                                    Content="Load"
-                                                    Height="26"
-                                                    Command="{Binding LoadCommand}" />
+                                                <Button Grid.Column="0"
+                                                        Content="Load"
+                                                        Height="26"
+                                                        Command="{Binding LoadCommand}"/>
+                                                
+                                                <Button Grid.Column="2"
+                                                        Content="Place"
+                                                        Height="26"
+                                                        Command="{Binding PlaceCommand}"/>
+                                                
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
 
-                                            <Button Grid.Column="2"
-                                                    Content="Place"
-                                                    Height="26"
-                                                    Command="{Binding PlaceCommand}" />
-                                        </Grid>
-                                    </StackPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
+                    <Border x:Name="DetailsPanel"
+                            Width="320"
+                            Padding="12"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Stretch"
+                            Background="#FAFAFA"
+                            BorderBrush="#DADADA"
+                            BorderThickness="1"
+                            Panel.ZIndex="10">
+                        <Border.RenderTransform>
+                            <TranslateTransform x:Name="DetailsPanelTransform" X="340"/> 
+                        </Border.RenderTransform>
+
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <DockPanel Grid.Row="0">
+                                <TextBlock Text="族详情"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           VerticalAlignment="Center"/>
+                                <Button DockPanel.Dock="Right"
+                                        Width="28"
+                                        Height="28"
+                                        Content="X"
+                                        Command="{Binding CloseDetailsCommand}"/>
+                            </DockPanel>
+
+                            <Separator Grid.Row="1" Margin="0,8,0,10"/>
+
+                            <StackPanel Grid.Row="2">
+                                <TextBlock FontWeight="SemiBold" Text="名称"/>
+                                <TextBlock Margin="0,4,0,10"
+                                           TextWrapping="Wrap"
+                                           Text="{Binding SelectedFamily.FileName}"/>
+
+                                <TextBlock FontWeight="SemiBold" Text="路径"/>
+                                <TextBlock Margin="0,4,0,10"
+                                           Opacity="0.75"
+                                           TextWrapping="Wrap"
+                                           Text="{Binding SelectedFamily.FilePath}"/> 
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </Grid>
             </Grid>
         </Border>
     </Grid>

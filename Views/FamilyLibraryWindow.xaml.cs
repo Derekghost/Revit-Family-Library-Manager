@@ -1,14 +1,10 @@
 ﻿using RevitFamilyBrowser.ViewModels;
 using System;
-using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.IO;
-using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Threading;
+using System.Windows.Media.Animation;
 
 namespace RevitFamilyBrowser.Views
 {
@@ -41,13 +37,55 @@ namespace RevitFamilyBrowser.Views
             // ✅ 让缩略图队列知道“UI线程是谁”
             ThumbnailQueue.Initialize(this.Dispatcher); // ✅ 关键
             //DataContext = new FamilyLibraryViewModel(@"D:\User\Family");//
+            DataContextChanged += OnDataContextChanged;
             DataContext = new FamilyLibraryViewModel();
+            OnDataContextChanged(this, new DependencyPropertyChangedEventArgs(DataContextProperty, null, DataContext));
             _revitHwnd = revitHwnd;
+        }
+
+        private FamilyLibraryViewModel _viewModel;
+
+        private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
+        {
+            if(_viewModel != null)
+                _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+
+            _viewModel = DataContext as FamilyLibraryViewModel;
+            if(_viewModel != null)
+            {
+                _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+                UpdateDetailsPanelState(false);
+            }
+        }
+
+        private void OnViewModelPropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(FamilyLibraryViewModel.IsDetailsPaneOpen))
+                UpdateDetailsPanelState(true);
+        }
+
+        private void UpdateDetailsPanelState(bool animate)
+        {
+            var target = (_viewModel != null && _viewModel.IsDetailsPaneOpen) ? 0 : 340;
+            if (!animate)
+            {
+                DetailsPanelTransform.X = target;
+                return;
+            }
+
+            var ani = new DoubleAnimation
+            {
+                To = target,
+                Duration = TimeSpan.FromMilliseconds(220),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            DetailsPanelTransform.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, ani);
         }
 
         protected override void OnClosed(EventArgs e)
         {
             if(_topmostTimer != null) _topmostTimer.Stop();
+            if(_viewModel != null) _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
             base.OnClosed(e);
         }
 
