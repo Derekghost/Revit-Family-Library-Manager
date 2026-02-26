@@ -8,6 +8,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Data;
 using RevitFamilyBrowser.ViewModels;
+using RevitFamilyBrowser.Properties;
 
 namespace RevitFamilyBrowser.ViewModels
 {
@@ -47,7 +48,9 @@ namespace RevitFamilyBrowser.ViewModels
         }
 
         // ✅ 新增：选择文件夹命令（左侧按钮绑定）
+        // ✅ 新增：打开上一次文件夹（左侧按钮绑定）
         public RelayCommand BrowseRootCommand { get; }
+        public RelayCommand OpenLastRootCommand { get; }
 
         private FolderNodeViewModel _selectedFolder;
         public FolderNodeViewModel SelectedFolder
@@ -111,6 +114,7 @@ namespace RevitFamilyBrowser.ViewModels
             FamilyFilesView.Filter = FilterFamilyFile;
 
             BrowseRootCommand = new RelayCommand(_ => BrowseForRootFolder());
+            OpenLastRootCommand = new RelayCommand(_ => OpenLastRootFolder(), _ => HasLastRootPath());
             OpenDetailsCommand = new RelayCommand(OpenDetails);
             CloseDetailsCommand = new RelayCommand(_ => IsDetailsPaneOpen = false);
 
@@ -118,7 +122,42 @@ namespace RevitFamilyBrowser.ViewModels
             // SetRootPath(@"D:\User\Family");
 
             // ✅ 当前：不固定路径（rootPath 传 null 就等待用户选择）
-            SetRootPath(string.IsNullOrWhiteSpace(rootPath) ? null : rootPath);
+            var initialPath = string.IsNullOrWhiteSpace(rootPath) ? null : rootPath;
+            SetRootPath(string.IsNullOrWhiteSpace(initialPath) ? null : initialPath);
+        }
+
+        private bool HasLastRootPath()
+        {
+            return !string.IsNullOrWhiteSpace(GetLastRootPath());
+        }
+
+        private string GetLastRootPath()
+        {
+            try
+            {
+                return Settings.Default.LastRootPath;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void SaveLastRootPath(string path)
+        {
+            try
+            {
+                Settings.Default.LastRootPath = path ?? string.Empty;
+                Settings.Default.Save();
+            }
+            catch
+            {
+                // 写入配置失败时保持静默，避免影响主流程
+            }
+            finally
+            {
+                OpenLastRootCommand.RaiseCanExecuteChanged();
+            }
         }
 
         private void SetRootPath(string rootPath)
@@ -165,7 +204,8 @@ namespace RevitFamilyBrowser.ViewModels
                     dlg.Description = "选择族库根目录";
                     if (!string.IsNullOrWhiteSpace(RootPath) && Directory.Exists(RootPath))
                         dlg.SelectedPath = RootPath;
-
+                    else if(HasLastRootPath() && Directory.Exists(GetLastRootPath()))
+                        dlg.SelectedPath = GetLastRootPath();
                     var result = dlg.ShowDialog();
                     if (result != System.Windows.Forms.DialogResult.OK) return;
 
@@ -173,12 +213,25 @@ namespace RevitFamilyBrowser.ViewModels
                     if (string.IsNullOrWhiteSpace(path)) return;
 
                     SetRootPath(path);
+                    SaveLastRootPath(path);
                 }
             }
             catch
             {
-                // 需要的话你可以 StatusText 提示
+                // 需要的话可以 StatusText 提示
             }
+        }
+
+        private void OpenLastRootFolder()
+        {
+            var path = GetLastRootPath();
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                StatusText = "没有上次使用的目录记录";
+                return;
+            }
+
+            SetRootPath(path);
         }
 
         private bool FilterFamilyFile(object obj)

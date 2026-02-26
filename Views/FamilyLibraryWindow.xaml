@@ -5,12 +5,12 @@
         WindowStartupLocation="CenterScreen">
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="320"/>
-            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="320" MinWidth="220"/>
+            <ColumnDefinition Width="*" MinWidth="320"/>
         </Grid.ColumnDefinitions>
 
         <!-- 左侧：文件树 -->
-        <Border Grid.Column="0" BorderBrush="#333" BorderThickness="1" Margin="8">
+        <Border Grid.Column="0" BorderBrush="#333" BorderThickness="1" Margin="8,8,3,8">
             <DockPanel Margin="8">
 
                 <TextBlock DockPanel.Dock="Top" Margin="8,8,8,6"
@@ -18,9 +18,14 @@
                            Text="Folders"/>
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
                     <Button Content="选择族库文件夹"
-                Height="26"
-                MinWidth="120"
-                Command="{Binding BrowseRootCommand}" />
+                        Height="26"
+                        MinWidth="120"
+                        Command="{Binding BrowseRootCommand}" />
+                    <Button Content="打开上次路径"
+                            Height="26"
+                            MinWidth="100"
+                            Margin="8,0,0,0"
+                            Command="{Binding OpenLastRootCommand}"/>
                     <TextBlock Text="{Binding StatusText}" Margin="10,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
                 <TreeView ItemsSource="{Binding RootNodes}" Margin="8,0,8,8">
@@ -40,8 +45,19 @@
             </DockPanel>
         </Border>
 
+        <GridSplitter Grid.Column="0"
+                      Width="3"
+                      HorizontalAlignment="Right"
+                      VerticalAlignment="Stretch"
+                      Background="#E3E3E3"
+                      ShowsPreview="True"
+                      ResizeBehavior="CurrentAndNext"
+                      ResizeDirection="Columns"
+                      Panel.ZIndex="20"
+                      Cursor="SizeWE"/>
+
         <!-- 右侧：列表/搜索结果 -->
-        <Border Grid.Column="1" BorderBrush="#333" BorderThickness="1" Margin="8">
+        <Border Grid.Column="1" BorderBrush="#333" BorderThickness="1" Margin="3,8,8,8">
             <Grid Margin="8">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
