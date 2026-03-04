@@ -39,6 +39,7 @@ namespace RevitFamilyBrowser
                 // modeless：不阻塞 Revit
                 RevitFamilyBrowser.RevitBridge.RevitFamilyLoader.Initialize();
                 RevitFamilyBrowser.RevitBridge.RevitFamilyPlacer.Initialize();
+                RevitFamilyBrowser.RevitBridge.RevitFamilyParameterReader.Initialize();
                 new WindowInteropHelper(_win).Owner = revitHwnd;
                 _win.Show();
 

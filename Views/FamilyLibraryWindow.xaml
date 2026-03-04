@@ -181,18 +181,41 @@
 
                             <Separator Grid.Row="1" Margin="0,8,0,10"/>
 
-                            <StackPanel Grid.Row="2">
-                                <TextBlock FontWeight="SemiBold" Text="名称"/>
-                                <TextBlock Margin="0,4,0,10"
+                            <Grid Grid.Row="2">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" FontWeight="SemiBold" Text="名称"/>
+                                <TextBlock Grid.Row="1" Margin="0,4,0,8"
                                            TextWrapping="Wrap"
                                            Text="{Binding SelectedFamily.FileName}"/>
 
-                                <TextBlock FontWeight="SemiBold" Text="路径"/>
-                                <TextBlock Margin="0,4,0,10"
+                                <TextBlock Grid.Row="2" FontWeight="SemiBold" Text="路径"/>
+                                <TextBlock Grid.Row="2" Margin="0,24,0,8"
                                            Opacity="0.75"
                                            TextWrapping="Wrap"
-                                           Text="{Binding SelectedFamily.FilePath}"/> 
-                            </StackPanel>
+                                           Text="{Binding SelectedFamily.FilePath}"/>
+                                <StackPanel Grid.Row="3">
+                                    <TextBlock FontWeight="SemiBold" Margin="0,8,0,4" Text="参数"/>
+                                    <TextBlock Margin="0,0,0,6"
+                                               Foreground="#666"
+                                               Text="{Binding SelectedFamily.ParameterStatus}"/>
+
+                                    <ListView ItemsSource="{Binding SelectedFamily.Parameters}" Height="280">
+                                        <ListView.View>
+                                            <GridView>
+                                                <GridViewColumn Header="名称" Width="120" DisplayMemberBinding="{Binding Name}"/>
+                                                <GridViewColumn Header="值" Width="120" DisplayMemberBinding="{Binding Value}"/>
+                                                <GridViewColumn Header="来源" Width="60" DisplayMemberBinding="{Binding Source}"/>
+                                            </GridView>
+                                        </ListView.View>
+                                    </ListView>
+                                </StackPanel>
+                            </Grid>
                         </Grid>
                     </Border>
                 </Grid>

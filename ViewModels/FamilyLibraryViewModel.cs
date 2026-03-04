@@ -9,6 +9,7 @@ using System.Runtime.CompilerServices;
 using System.Windows.Data;
 using RevitFamilyBrowser.ViewModels;
 using RevitFamilyBrowser.Properties;
+using RevitFamilyBrowser.RevitBridge;
 
 namespace RevitFamilyBrowser.ViewModels
 {
@@ -252,6 +253,7 @@ namespace RevitFamilyBrowser.ViewModels
 
             SelectedFamily = item;
             IsDetailsPaneOpen = true;
+            ReadSelectedFamilyParameters(item);
         }
 
         private void RefreshFamilyFiles()
@@ -326,6 +328,47 @@ namespace RevitFamilyBrowser.ViewModels
             });
         }
 
+        private void ReadSelectedFamilyParameters(FamilyThumbItemViewModel item)
+        {
+            if(item == null) return;
+
+            item.ParametersStatus = "正在读取参数...";
+            item.Parameters.Clear();
+
+            RevitFamilyParameterReader.RequestRead(item.FileName, result =>
+            {
+                _ui.BeginInvoke(new Action(() =>
+                {
+                    if (!ReferenceEquals(SelectedFamily, item)) return;
+
+                    item.Parameters.Clear();
+
+                    if (result == null)
+                    {
+                        item.ParametersStatus = "读取参数失败";
+                        return;
+                    }
+
+                    if (result.Parameters != null)
+                    {
+                        foreach (var p in result.Parameters)
+                        {
+                            item.Parameters.Add(new FamilyParameterItemViewModel
+                            {
+                                Name = p.Name,
+                                Value = p.Value,
+                                Source = p.Source
+                            });
+                        }
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(result.StatusMessage))
+                        item.ParametersStatus = result.StatusMessage;
+                    else
+                        item.ParametersStatus = item.Parameters.Count > 0 ? $"共 {item.Parameters.Count} 个参数" : "没有参数";
+                }));
+            });
+        }
         public event PropertyChangedEventHandler PropertyChanged;
         private void OnpropertyChanged([CallerMemberName] string name = null)
         {
