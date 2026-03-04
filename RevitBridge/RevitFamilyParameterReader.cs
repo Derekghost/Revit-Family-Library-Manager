@@ -62,29 +62,37 @@ namespace RevitFamilyBrowser.RevitBridge
                         return;
                     }
 
-                    var symbolId = fam.GetFamilySymbolIds().FirstOrDefault();
-                    if (symbolId == ElementId.InvalidElementId)
-                    {
-                        cb(new FamilyParameterReadResult { IsLoaded = true, StatusMessage = "族已载入，但没有可用类型" });
-                        return;
-                    }
-
-                    var symbol = doc.GetElement(symbolId) as FamilySymbol;
                     var list = new List<FamilyParameterInfo>();
 
-                    if (symbol != null)
+                    var familyDoc =doc.EditFamily(fam);
+                    try
                     {
-                        foreach (Parameter p in symbol.Parameters)
+                        var familyManager = familyDoc.FamilyManager;
+                        if (familyManager != null)
                         {
-                            if(p == null || p.Definition == null) continue;
+                            if(familyManager.CurrentType == null)
+                            {
+                                var firstType = familyManager.Types.Cast<FamilyType>().FirstOrDefault();
+                                if(firstType != null)
+                                    familyManager.CurrentType = firstType;
+                            }
+                        }
+
+                        foreach (FamilyParameter fp in familyManager.Parameters)
+                        {
+                            if(fp == null || fp.Definition == null) continue;
 
                             list.Add(new FamilyParameterInfo
                             {
-                                Name = p.Definition.Name,
-                                Value = FormatParameterValue(p, doc),
-                                Source = p.IsShared ? "Shared" : "Type"
+                                Name = fp.Definition.Name,
+                                Value = FormatFamilyParameterValue(familyManager, fp, familyDoc),
+                                Source = fp.IsShared ? "共享参数" : (fp.IsInstance ? "实例参数" : "类型参数")
                             });
                         }
+                    }
+                    finally
+                    {
+                        familyDoc?.Close(false);
                     }
 
                     var distinct = list
@@ -97,7 +105,7 @@ namespace RevitFamilyBrowser.RevitBridge
                     {
                         IsLoaded = true,
                         Parameters = distinct,
-                        StatusMessage = distinct.Count > 0 ? "族已载入，但未读取到可展示参数" : null
+                        StatusMessage = distinct.Count == 0 ? "族已载入，但未读取到可展示参数" : null
                     });
                 }
                 catch (Exception ex)
@@ -107,23 +115,24 @@ namespace RevitFamilyBrowser.RevitBridge
             }
 
             public string GetName() => "Family Parameter Reader ExternalEvent";
-            private static string FormatParameterValue(Parameter p, Document doc)
-            {
-                var v = p.AsValueString();
-                if (!string.IsNullOrWhiteSpace(v)) return v;
 
-                switch (p.StorageType)
+            private static string FormatFamilyParameterValue(FamilyManager familyManager, FamilyParameter familyParameter, Document familyDoc)
+            {
+                if(familyManager?.CurrentType == null || familyParameter == null) return "";
+
+                var familyType = familyManager.CurrentType;
+                switch (familyParameter.StorageType)
                 {
                     case StorageType.String:
-                        return p.AsString() ?? "";
+                        return familyType.AsString(familyParameter) ?? "";
                     case StorageType.Integer:
-                        return p.AsInteger().ToString();
+                        return familyType.AsInteger(familyParameter).ToString();
                     case StorageType.Double:
-                        return p.AsDouble().ToString("0.###");
+                        return string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0.###}", familyType.AsDouble(familyParameter));
                     case StorageType.ElementId:
-                        var id = p.AsElementId();
+                        var id = familyType.AsElementId(familyParameter);
                         if(id == null || id == ElementId.InvalidElementId) return "<None>";
-                        var e = doc.GetElement(id);
+                        var e = familyDoc.GetElement(id);
                         return e != null ? e.Name : id.IntegerValue.ToString();
                     default:
                         return "";
