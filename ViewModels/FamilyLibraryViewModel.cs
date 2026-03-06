@@ -12,6 +12,7 @@ using RevitFamilyBrowser.ViewModels;
 using RevitFamilyBrowser.Properties;
 using RevitFamilyBrowser.RevitBridge;
 using System.Data;
+using System.Windows.Media.Imaging;
 
 namespace RevitFamilyBrowser.ViewModels
 {
@@ -249,26 +250,13 @@ namespace RevitFamilyBrowser.ViewModels
                         projectRoot,
                         categoryName: group.Key,
                         onSelected: node => SelectedNode = node);
-
-                    foreach (var family in group.OrderBy(f => f.FamilyName ?? f.Name, StringComparer.OrdinalIgnoreCase))
-                    {
-                        var familyName = !string.IsNullOrWhiteSpace(family.FamilyName) ? family.FamilyName : family.Name;
-                        categoryNode.Children.Add(new LibraryTreeNodeViewModel(
-                            familyName,
-                            LibraryTreeNodeType.Family,
-                            categoryNode,
-                            familyName: familyName,
-                            categoryName: familyName,
-                            onSelected: node => SelectedNode = node));
-                    }
-
                     return categoryNode;
                 });
 
             projectRoot.ReplaceChildren(categoryNodes);
             RootNodes.Add(projectRoot);
             projectRoot.IsExpanded = true;
-            SelectedNode = projectRoot;
+            SelectedNode = (LibraryTreeNodeViewModel)(projectRoot.Children.FirstOrDefault() ?? projectRoot);
 
             var status = !string.IsNullOrWhiteSpace(snapshot.StatusMessage) ? snapshot.StatusMessage : $"已加载{families.Count}个项目族";
             UpdateStatusText(status);
@@ -454,8 +442,53 @@ namespace RevitFamilyBrowser.ViewModels
             foreach (var family in families)
             {
                 var displayName = !string.IsNullOrWhiteSpace(family.FamilyName) ? family.FamilyName : family.Name;
-                var vm = new FamilyThumbItemViewModel(family.FullPath, displayName);
+                var vm = new FamilyThumbItemViewModel(family.FullPath, displayName)
+                {
+                    ShowLoadPlaceActions = false,
+                    LoadCommand = null,
+                    PlaceCommand = null
+                };
                 FamilyFiles.Add(vm);
+
+                if (!string.IsNullOrWhiteSpace(displayName))
+                {
+                    var expectedSeletedNode = selectedNode;
+                    RevitProjectFamilyThumbnailProvider.RequestThumbnail(displayName, 256, 256, result =>
+                    {
+                        _ui.BeginInvoke(new Action(() =>
+                        {
+                            if (CurrentLibraryMode != LibraryMode.Project) return;
+                            if (!ReferenceEquals(SelectedNode, expectedSeletedNode)) return;
+                            if (result == null || result.ImageBytes == null || result.ImageBytes.Length == 0) return;
+
+                            var image = TryCreateBitmap(result.ImageBytes);
+                            if (image != null)
+                                vm.Thumbnail = image;
+                        }));
+                    });
+                }
+            }
+        }
+
+        private static BitmapImage TryCreateBitmap(byte[] imageBytes)
+        {
+            if (imageBytes == null || imageBytes.Length == 0) return null;
+
+            try
+            {
+                using (var ms = new MemoryStream(imageBytes))
+                {
+                    var bitmap = new BitmapImage();
+                    bitmap.BeginInit();
+                    bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                    bitmap.EndInit();
+                    bitmap.Freeze();
+                    return bitmap;
+                }
+            }
+            catch
+            {
+                return null;
             }
         }
 
@@ -495,7 +528,10 @@ namespace RevitFamilyBrowser.ViewModels
                     foreach (var f in files)
                     {
                         var name = Path.GetFileNameWithoutExtension(f);
-                        var vm = new FamilyThumbItemViewModel(f, name);
+                        var vm = new FamilyThumbItemViewModel(f, name)
+                        {
+                            ShowLoadPlaceActions = true
+                        };
 
                         vm.LoadCommand = new RelayCommand(_ =>
                         {

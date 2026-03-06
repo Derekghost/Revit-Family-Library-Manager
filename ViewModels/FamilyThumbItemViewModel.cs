@@ -29,6 +29,17 @@ namespace RevitFamilyBrowser.ViewModels
             }
         }
         public ObservableCollection<FamilyParameterItemViewModel> Parameters { get; set; } = new ObservableCollection<FamilyParameterItemViewModel>();
+        private bool _showLoadPlaceActions = true;
+        public bool ShowLoadPlaceActions
+        {
+            get => _showLoadPlaceActions;
+            set
+            {
+                if (_showLoadPlaceActions == value) return;
+                _showLoadPlaceActions = value;
+                OnpropertyChanged();
+            }
+        }
         public ICommand LoadCommand { get; set; }
 
         public ICommand PlaceCommand { get; set; }

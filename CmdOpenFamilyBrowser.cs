@@ -41,6 +41,7 @@ namespace RevitFamilyBrowser
                 RevitFamilyBrowser.RevitBridge.RevitFamilyPlacer.Initialize();
                 RevitFamilyBrowser.RevitBridge.RevitFamilyParameterReader.Initialize();
                 RevitFamilyBrowser.RevitBridge.RevitProjectFamilyCollector.Initialize();
+                RevitFamilyBrowser.RevitBridge.RevitProjectFamilyThumbnailProvider.Initialize();
                 new WindowInteropHelper(_win).Owner = revitHwnd;
                 _win.Show();
 
