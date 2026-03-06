@@ -72,7 +72,7 @@ namespace RevitFamilyBrowser.ViewModels
                 if (_currentLibraryMode == value) return;
                 _currentLibraryMode = value;
                 OnpropertyChanged();
-                OnpropertyChanged(nameof(ToggleLibraryModeCommand));
+                OnpropertyChanged(nameof(ToggleLibraryModeText));
                 BrowseRootCommand?.RaiseCanExecuteChanged();
                 OpenLastRootCommand?.RaiseCanExecuteChanged();
             }
@@ -143,6 +143,7 @@ namespace RevitFamilyBrowser.ViewModels
 
             BrowseRootCommand = new RelayCommand(_ => BrowseForRootFolder(), _ => CurrentLibraryMode == LibraryMode.Local);
             OpenLastRootCommand = new RelayCommand(_ => OpenLastRootFolder(), _ => CurrentLibraryMode == LibraryMode.Local && HasLastRootPath());
+            ToggleLibraryModeCommand = new RelayCommand(_ => ToggleLibraryMode());
             OpenDetailsCommand = new RelayCommand(OpenDetails);
             CloseDetailsCommand = new RelayCommand(_ => IsDetailsPaneOpen = false);
 
