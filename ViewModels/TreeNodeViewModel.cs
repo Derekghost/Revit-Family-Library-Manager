@@ -1,6 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System;
 
 namespace RevitFamilyBrowser.ViewModels
 {
@@ -11,6 +12,9 @@ namespace RevitFamilyBrowser.ViewModels
         
         public ObservableCollection<TreeNodeViewModel> Children { get; } = new ObservableCollection<TreeNodeViewModel>();
         public TreeNodeViewModel Parent { get; private set; }
+
+        protected Action<TreeNodeViewModel> ExpandChildrenCallback { get; set; }
+
         public bool IsExpanded
         {
             get => _isExpanded;
@@ -20,10 +24,9 @@ namespace RevitFamilyBrowser.ViewModels
                 {
                     _isExpanded = value;
                     OnPropertyChanged();
-
-                    if (_isExpanded)
-                        OnExpanded();
                 }
+                if (_isExpanded)
+                    OnExpanded();
             }
         }
 
@@ -44,7 +47,10 @@ namespace RevitFamilyBrowser.ViewModels
             Parent = parent;
         }
 
-        protected virtual void OnExpanded() { }
+        protected virtual void OnExpanded() 
+        {
+            ExpandChildrenCallback?.Invoke(this);
+        }
 
         protected virtual void OnSelected() { }
 

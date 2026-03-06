@@ -41,8 +41,7 @@ namespace RevitFamilyBrowser.ViewModels
 
         protected override void OnSelected()
         {
-            if(_owner != null)
-                _owner.SelectedFolder = this;
+            // Deprecated node model: selection handled by LibraryTreeNodeViewModel.
         }
         protected override void OnExpanded()
         {

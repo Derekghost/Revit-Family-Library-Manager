@@ -1,11 +1,12 @@
-﻿using System.Collections.ObjectModel;
+﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.IO;
+using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using System.Windows.Threading;
-using System.IO;
-using System;
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using System.Windows.Data;
 using RevitFamilyBrowser.ViewModels;
 using RevitFamilyBrowser.Properties;
@@ -15,11 +16,12 @@ namespace RevitFamilyBrowser.ViewModels
 {
     public class FamilyLibraryViewModel : INotifyPropertyChanged
     {
-        public ObservableCollection<TreeNodeViewModel> RootNodes { get; } = new ObservableCollection<TreeNodeViewModel>();
+        public ObservableCollection<LibraryTreeNodeViewModel> RootNodes { get; } = new ObservableCollection<LibraryTreeNodeViewModel>();
         public ObservableCollection<FamilyThumbItemViewModel> FamilyFiles { get; } = new ObservableCollection<FamilyThumbItemViewModel>();
         public ICollectionView FamilyFilesView { get; private set; }
 
-        private int _scanVersion = 0;
+        private readonly List<ProjectFamilyNodeItem> _projectFamilies = new List<ProjectFamilyNodeItem>();
+        private int _scanVersion;
         private readonly Dispatcher _ui;
 
         // ✅ 新增：根目录路径（可绑定到UI显示）
@@ -53,14 +55,14 @@ namespace RevitFamilyBrowser.ViewModels
         public RelayCommand BrowseRootCommand { get; }
         public RelayCommand OpenLastRootCommand { get; }
 
-        private FolderNodeViewModel _selectedFolder;
-        public FolderNodeViewModel SelectedFolder
+        private LibraryTreeNodeViewModel _selectedNode;
+        public LibraryTreeNodeViewModel SelectedNode
         {
-            get => _selectedFolder;
+            get => _selectedNode;
             set
             {
-                if (_selectedFolder == value) return;
-                _selectedFolder = value;
+                if (_selectedNode == value) return;
+                _selectedNode = value;
                 OnpropertyChanged();
                 RefreshFamilyFiles();
             }
@@ -69,13 +71,13 @@ namespace RevitFamilyBrowser.ViewModels
         private string _searchText = "";
         public string SearchText
         {
-            get { return _searchText; }
+            get => _searchText;
             set
             {
                 if (_searchText == value) return;
                 _searchText = value ?? "";
                 OnpropertyChanged();
-                if (FamilyFilesView != null) FamilyFilesView.Refresh();
+                FamilyFilesView?.Refresh();
             }
         }
 
@@ -85,7 +87,7 @@ namespace RevitFamilyBrowser.ViewModels
             get => _selectedFamily;
             private set
             {
-                if(_selectedFamily == value) return;
+                if (_selectedFamily == value) return;
                 _selectedFamily = value;
                 OnpropertyChanged();
             }
@@ -127,6 +129,15 @@ namespace RevitFamilyBrowser.ViewModels
             SetRootPath(string.IsNullOrWhiteSpace(initialPath) ? null : initialPath);
         }
 
+        public void SetProjectFamilies(IEnumerable<ProjectFamilyNodeItem> families)
+        {
+            _projectFamilies.Clear();
+            if (families != null)
+                _projectFamilies.AddRange(families.Where(f => f != null));
+
+            if (SelectedNode != null && SelectedNode.NodeType != LibraryTreeNodeType.Folder)
+                RefreshFamilyFiles();
+        }
         private bool HasLastRootPath()
         {
             return !string.IsNullOrWhiteSpace(GetLastRootPath());
@@ -168,13 +179,13 @@ namespace RevitFamilyBrowser.ViewModels
             // 重置界面数据
             RootNodes.Clear();
             FamilyFiles.Clear();
-            _selectedFolder = null;
-            OnpropertyChanged(nameof(SelectedFolder));
+            _selectedNode = null;
+            OnpropertyChanged(nameof(SelectedNode));
 
             if (string.IsNullOrWhiteSpace(rootPath))
             {
                 StatusText = "请选择族库目录";
-                if (FamilyFilesView != null) FamilyFilesView.Refresh();
+                FamilyFilesView?.Refresh();
                 return;
             }
 
@@ -183,16 +194,37 @@ namespace RevitFamilyBrowser.ViewModels
                 StatusText = "目录不存在或无权限访问： " + rootPath;
                 // 仍然显示一个根节点，让用户知道你在看哪个路径
                 var invalidRoot = new FolderNodeViewModel(rootPath, null, true, this);
-                RootNodes.Add(invalidRoot);
+                RootNodes.Add(CreateFolderNode(rootPath, null, true));
                 return;
             }
 
             StatusText = "Root: " + rootPath;
-            var rootNode = new FolderNodeViewModel(rootPath, null, true, this);
+            var rootNode = CreateFolderNode(rootPath, null, true);
             RootNodes.Add(rootNode);
+            SelectedNode = rootNode;
+        }
 
-            // ✅ 让右侧立刻显示根目录（含子文件夹内的族）
-            SelectedFolder = rootNode;
+        private LibraryTreeNodeViewModel CreateFolderNode(string fullPath, LibraryTreeNodeViewModel parent, bool isRoot)
+        {
+            var nodeName = isRoot ? fullPath : Path.GetFileName(fullPath);
+            return new LibraryTreeNodeViewModel(
+                nodeName,
+                LibraryTreeNodeType.Folder,
+                parent,
+                fullPath: fullPath,
+                onSelected: node => SelectedNode = node,
+                loadChildrenOnExpand: node =>
+                {
+                    node.ClearDummyChild();
+                    foreach (var dir in SafeEnumerateDirectories(node.FullPath))
+                        node.Children.Add(CreateFolderNode(dir, node, false));
+                });
+        }
+
+        private static IEnumerable<string> SafeEnumerateDirectories(string path)
+        {
+            try { return Directory.GetDirectories(path); }
+            catch { return Array.Empty<string>(); }
         }
 
         private void BrowseForRootFolder()
@@ -205,8 +237,9 @@ namespace RevitFamilyBrowser.ViewModels
                     dlg.Description = "选择族库根目录";
                     if (!string.IsNullOrWhiteSpace(RootPath) && Directory.Exists(RootPath))
                         dlg.SelectedPath = RootPath;
-                    else if(HasLastRootPath() && Directory.Exists(GetLastRootPath()))
+                    else if (HasLastRootPath() && Directory.Exists(GetLastRootPath()))
                         dlg.SelectedPath = GetLastRootPath();
+
                     var result = dlg.ShowDialog();
                     if (result != System.Windows.Forms.DialogResult.OK) return;
 
@@ -262,20 +295,48 @@ namespace RevitFamilyBrowser.ViewModels
             SelectedFamily = null;
             IsDetailsPaneOpen = false;
 
-            if (_selectedFolder == null)
+            if (_selectedNode == null)
             {
                 if (FamilyFilesView != null) FamilyFilesView.Refresh();
                 return;
             }
 
-            string dir = _selectedFolder.FullPath;
-            if (!Directory.Exists(dir))
+            if (SelectedNode.NodeType == LibraryTreeNodeType.Folder)
             {
-                if (FamilyFilesView != null) FamilyFilesView.Refresh();
+                RefreshFromLocalFoler(SelectedNode.FullPath);
                 return;
             }
 
-            int myVersion = ++_scanVersion;
+            RefreshFromProjectFamilies(SelectedNode);
+            FamilyFilesView?.Refresh();
+        }
+
+        private void RefreshFromProjectFamilies(LibraryTreeNodeViewModel selectedNode)
+        {
+            var families = _projectFamilies.AsEnumerable();
+            if (!string.IsNullOrWhiteSpace(selectedNode.CategoryName))
+                families = families.Where(f => string.Equals(f.CategoryName, selectedNode.CategoryName, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrWhiteSpace(selectedNode.FamilyName))
+                families = families.Where(f => string.Equals(f.FamilyName, selectedNode.FamilyName, StringComparison.OrdinalIgnoreCase));
+
+            foreach (var family in families)
+            {
+                var displayName = !string.IsNullOrWhiteSpace(family.FamilyName) ? family.FamilyName : family.Name;
+                var vm = new FamilyThumbItemViewModel(family.FullPath, displayName);
+                FamilyFiles.Add(vm);
+            }
+        }
+
+        private void RefreshFromLocalFoler(string dir)
+        {
+            if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir))
+            {
+                FamilyFilesView?.Refresh();
+                return;
+            }
+
+            int myVersion = ++_scanVersion; // 版本号，确保异步结果不会覆盖后续的刷新
 
             // 后台递归扫描（避免 UI 卡死）
             Task.Run(() =>
@@ -323,14 +384,14 @@ namespace RevitFamilyBrowser.ViewModels
                         });
                     }
 
-                    if (FamilyFilesView != null) FamilyFilesView.Refresh();
+                    FamilyFilesView?.Refresh();
                 }));
             });
         }
 
         private void ReadSelectedFamilyParameters(FamilyThumbItemViewModel item)
         {
-            if(item == null) return;
+            if (item == null) return;
 
             item.ParametersStatus = "正在读取参数...";
             item.Parameters.Clear();
@@ -374,5 +435,12 @@ namespace RevitFamilyBrowser.ViewModels
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
+    }
+    public class ProjectFamilyNodeItem
+    {
+        public string Name { get; set; }
+        public string CategoryName { get; set; }
+        public string FamilyName { get; set; }
+        public string FullPath { get; set; }
     }
 }
