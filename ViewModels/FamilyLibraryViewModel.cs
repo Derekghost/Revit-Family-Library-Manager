@@ -11,11 +11,17 @@ using System.Windows.Data;
 using RevitFamilyBrowser.ViewModels;
 using RevitFamilyBrowser.Properties;
 using RevitFamilyBrowser.RevitBridge;
+using System.Data;
 
 namespace RevitFamilyBrowser.ViewModels
 {
     public class FamilyLibraryViewModel : INotifyPropertyChanged
     {
+        public enum LibraryMode
+        {
+            Local,
+            Project
+        }
         public ObservableCollection<LibraryTreeNodeViewModel> RootNodes { get; } = new ObservableCollection<LibraryTreeNodeViewModel>();
         public ObservableCollection<FamilyThumbItemViewModel> FamilyFiles { get; } = new ObservableCollection<FamilyThumbItemViewModel>();
         public ICollectionView FamilyFilesView { get; private set; }
@@ -54,6 +60,25 @@ namespace RevitFamilyBrowser.ViewModels
         // ✅ 新增：打开上一次文件夹（左侧按钮绑定）
         public RelayCommand BrowseRootCommand { get; }
         public RelayCommand OpenLastRootCommand { get; }
+
+        public RelayCommand ToggleLibraryModeCommand { get; }
+
+        private LibraryMode _currentLibraryMode = LibraryMode.Local;
+        public LibraryMode CurrentLibraryMode
+        {
+            get => _currentLibraryMode;
+            private set
+            {
+                if (_currentLibraryMode == value) return;
+                _currentLibraryMode = value;
+                OnpropertyChanged();
+                OnpropertyChanged(nameof(ToggleLibraryModeCommand));
+                BrowseRootCommand?.RaiseCanExecuteChanged();
+                OpenLastRootCommand?.RaiseCanExecuteChanged();
+            }
+        }
+
+        public string ToggleLibraryModeText => CurrentLibraryMode == LibraryMode.Local ? "切换到项目族库" : "切换到本地族库";
 
         private LibraryTreeNodeViewModel _selectedNode;
         public LibraryTreeNodeViewModel SelectedNode
@@ -116,8 +141,8 @@ namespace RevitFamilyBrowser.ViewModels
             FamilyFilesView = CollectionViewSource.GetDefaultView(FamilyFiles);
             FamilyFilesView.Filter = FilterFamilyFile;
 
-            BrowseRootCommand = new RelayCommand(_ => BrowseForRootFolder());
-            OpenLastRootCommand = new RelayCommand(_ => OpenLastRootFolder(), _ => HasLastRootPath());
+            BrowseRootCommand = new RelayCommand(_ => BrowseForRootFolder(), _ => CurrentLibraryMode == LibraryMode.Local);
+            OpenLastRootCommand = new RelayCommand(_ => OpenLastRootFolder(), _ => CurrentLibraryMode == LibraryMode.Local && HasLastRootPath());
             OpenDetailsCommand = new RelayCommand(OpenDetails);
             CloseDetailsCommand = new RelayCommand(_ => IsDetailsPaneOpen = false);
 
@@ -143,6 +168,111 @@ namespace RevitFamilyBrowser.ViewModels
             return !string.IsNullOrWhiteSpace(GetLastRootPath());
         }
 
+        private void ToggleLibraryMode()
+        {
+            if (CurrentLibraryMode == LibraryMode.Local)
+                SwitchToProjectLibrary();
+            else
+                SwitchToLocalLibrary();
+        }
+        private void SwitchToLocalLibrary()
+        {
+            CurrentLibraryMode = LibraryMode.Local;
+
+            var pathToUse = RootPath;
+            if (string.IsNullOrWhiteSpace(pathToUse) || !Directory.Exists(pathToUse))
+                pathToUse = GetLastRootPath();
+
+            SetRootPath(string.IsNullOrWhiteSpace(pathToUse) ? null : pathToUse);
+            OpenLastRootCommand.RaiseCanExecuteChanged();
+        }
+        private void SwitchToProjectLibrary()
+        {
+            CurrentLibraryMode = LibraryMode.Project;
+            OpenLastRootCommand.RaiseCanExecuteChanged();
+
+            RootNodes.Clear();
+            FamilyFiles.Clear();
+            _selectedNode = null;
+            OnpropertyChanged(nameof(SelectedNode));
+            UpdateStatusText("正在收集项目族...");
+
+            RevitProjectFamilyCollector.RequestCollect(snapshot =>
+            {
+                _ui.BeginInvoke(new Action(() => BuildProjectTree(snapshot)));
+            });
+        }
+
+        private void BuildProjectTree(ProjectFamilySnapshot snapshot)
+        {
+            RootNodes.Clear();
+            FamilyFiles.Clear();
+            _projectFamilies.Clear();
+            _selectedNode = null;
+            OnpropertyChanged(nameof(SelectedNode));
+
+            var families = snapshot != null && snapshot.Families != null ? snapshot.Families : new List<ProjectFamilyItem> { };
+
+            if (families.Count == 0)
+            {
+                FamilyFilesView?.Refresh();
+                var message = snapshot != null && !string.IsNullOrWhiteSpace(snapshot.StatusMessage) ? snapshot.StatusMessage : "当前项目中未找到可用族";
+                UpdateStatusText(message);
+                return;
+            }
+            foreach (var family in families)
+            {
+                _projectFamilies.Add(new ProjectFamilyNodeItem
+                {
+                    Name = family.FamilyName,
+                    FamilyName = family.FamilyName,
+                    CategoryName = family.CategoryName,
+                    FullPath = null
+                });
+            }
+
+            var projectRoot = new LibraryTreeNodeViewModel(
+                "项目族库根",
+                LibraryTreeNodeType.FamilyCategory,
+                null,
+                onSelected: node => SelectedNode = node);
+
+            var categoryNodes = _projectFamilies
+                .GroupBy(f => string.IsNullOrWhiteSpace(f.CategoryName) ? "未分类" : f.CategoryName)
+                .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group =>
+                {
+                    var categoryNode = new LibraryTreeNodeViewModel(
+                        group.Key,
+                        LibraryTreeNodeType.FamilyCategory,
+                        projectRoot,
+                        categoryName: group.Key,
+                        onSelected: node => SelectedNode = node);
+
+                    foreach (var family in group.OrderBy(f => f.FamilyName ?? f.Name, StringComparer.OrdinalIgnoreCase))
+                    {
+                        var familyName = !string.IsNullOrWhiteSpace(family.FamilyName) ? family.FamilyName : family.Name;
+                        categoryNode.Children.Add(new LibraryTreeNodeViewModel(
+                            familyName,
+                            LibraryTreeNodeType.Family,
+                            categoryNode,
+                            familyName: familyName,
+                            categoryName: familyName,
+                            onSelected: node => SelectedNode = node));
+                    }
+
+                    return categoryNode;
+                });
+
+            projectRoot.ReplaceChildren(categoryNodes);
+            RootNodes.Add(projectRoot);
+            projectRoot.IsExpanded = true;
+            SelectedNode = projectRoot;
+
+            var status = !string.IsNullOrWhiteSpace(snapshot.StatusMessage) ? snapshot.StatusMessage : $"已加载{families.Count}个项目族";
+            UpdateStatusText(status);
+
+        }
         private string GetLastRootPath()
         {
             try
@@ -184,21 +314,21 @@ namespace RevitFamilyBrowser.ViewModels
 
             if (string.IsNullOrWhiteSpace(rootPath))
             {
-                StatusText = "请选择族库目录";
+                UpdateStatusText("请选择族库目录");
                 FamilyFilesView?.Refresh();
                 return;
             }
 
             if (!Directory.Exists(rootPath))
             {
-                StatusText = "目录不存在或无权限访问： " + rootPath;
+                UpdateStatusText("目录不存在或无权限访问： " + rootPath);
                 // 仍然显示一个根节点，让用户知道你在看哪个路径
                 var invalidRoot = new FolderNodeViewModel(rootPath, null, true, this);
                 RootNodes.Add(CreateFolderNode(rootPath, null, true));
                 return;
             }
 
-            StatusText = "Root: " + rootPath;
+            UpdateStatusText ("Root: " + rootPath);
             var rootNode = CreateFolderNode(rootPath, null, true);
             RootNodes.Add(rootNode);
             SelectedNode = rootNode;
@@ -261,7 +391,7 @@ namespace RevitFamilyBrowser.ViewModels
             var path = GetLastRootPath();
             if (string.IsNullOrWhiteSpace(path))
             {
-                StatusText = "没有上次使用的目录记录";
+                UpdateStatusText("没有上次使用的目录记录");
                 return;
             }
 
@@ -429,6 +559,17 @@ namespace RevitFamilyBrowser.ViewModels
                         item.ParametersStatus = item.Parameters.Count > 0 ? $"共 {item.Parameters.Count} 个参数" : "没有参数";
                 }));
             });
+        }
+
+        private void UpdateStatusText(string message)
+        {
+            var modePrefix = CurrentLibraryMode == LibraryMode.Project
+                ? "当前：项目族库（来自活动文档）"
+                : "当前：本地族库";
+
+            StatusText = string.IsNullOrWhiteSpace(message)
+                ? modePrefix
+                : modePrefix + "|" + message;
         }
         public event PropertyChangedEventHandler PropertyChanged;
         private void OnpropertyChanged([CallerMemberName] string name = null)

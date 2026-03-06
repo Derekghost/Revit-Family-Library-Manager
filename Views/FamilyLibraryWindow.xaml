@@ -27,6 +27,11 @@
                             MinWidth="100"
                             Margin="8,0,0,0"
                             Command="{Binding OpenLastRootCommand}"/>
+                    <Button Content="{Binding ToggleLibraryModeText}"
+                            Height="26"
+                            MinWidth="120"
+                            Margin="8,0,0,0"
+                            Command="{Binding ToggleLibraryModeCommand}"/>
                     <TextBlock Text="{Binding StatusText}" Margin="10,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
                 <TreeView ItemsSource="{Binding RootNodes}" Margin="8,0,8,8">
