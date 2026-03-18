@@ -53,17 +53,43 @@ namespace RevitFamilyBrowser.RevitBridge
 
                 try
                 {
-                    var families = new FilteredElementCollector(doc)
+                    var loadableFamilies = new FilteredElementCollector(doc)
                         .OfClass(typeof(Family))
                         .Cast<Family>()
                         .Select(f => new ProjectFamilyItem
                         {
                             FamilyName = f.Name,
                             CategoryName = f.FamilyCategory != null ? f.FamilyCategory.Name : string.Empty,
-                            FamilyId = f.Id != null ? f.Id.IntegerValue : 0
+                            FamilyId = f.Id != null ? f.Id.IntegerValue : 0,
+                            IsLoadableFamily = true
                         })
+                        .ToList();
+
+                    var loadableFamilyKeys = new HashSet<string>(
+                        loadableFamilies.Select(f => (f.CategoryName ?? string.Empty) + "|" + (f.FamilyName ?? string.Empty)),
+                        StringComparer.OrdinalIgnoreCase);
+
+                    var systemTypeItems = new FilteredElementCollector(doc)
+                        .WhereElementIsElementType()
+                        .Cast<ElementType>()
+                        .Where(t => t != null && t.Category != null)
+                        .Select(t => new ProjectFamilyItem
+                        {
+                            FamilyName = t.FamilyName ?? string.Empty,
+                            TypeName = t.Name ?? string.Empty,
+                            CategoryName = t.Category.Name,
+                            FamilyId = t.Id != null ? t.Id.IntegerValue : 0,
+                            IsLoadableFamily = false
+                        })
+                        .Where(t => !string.IsNullOrWhiteSpace(t.CategoryName) && !string.IsNullOrWhiteSpace(t.FamilyName))
+                        .Where(t => !loadableFamilyKeys.Contains((t.CategoryName ?? string.Empty) + "|" + (t.FamilyName ?? string.Empty)))
+                        .ToList();
+
+                    var families = loadableFamilies
+                        .Concat(systemTypeItems)
                         .OrderBy(f => f.CategoryName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                         .ThenBy(f => f.FamilyName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                        .ThenBy(f => f.TypeName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                         .ToList();
 
                     cb(new ProjectFamilySnapshot
@@ -97,5 +123,7 @@ namespace RevitFamilyBrowser.RevitBridge
         public string FamilyName { get; set; }
         public string CategoryName { get; set; }
         public int FamilyId { get; set; }
+        public string TypeName { get; set; }
+        public bool IsLoadableFamily { get; set; }
     }
 }

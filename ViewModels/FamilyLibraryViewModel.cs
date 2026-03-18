@@ -229,7 +229,9 @@ namespace RevitFamilyBrowser.ViewModels
                     Name = family.FamilyName,
                     FamilyName = family.FamilyName,
                     CategoryName = family.CategoryName,
-                    FullPath = null
+                    FullPath = null,
+                    TypeName = family.TypeName,
+                    IsLoadableFamily = family.IsLoadableFamily
                 });
             }
 
@@ -250,6 +252,19 @@ namespace RevitFamilyBrowser.ViewModels
                         projectRoot,
                         categoryName: group.Key,
                         onSelected: node => SelectedNode = node);
+
+                    var familyNodes = group
+                        .GroupBy(f => string.IsNullOrWhiteSpace(f.FamilyName) ? "未命名族" : f.FamilyName)
+                        .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                        .Select(familyGroup => new LibraryTreeNodeViewModel(
+                            familyGroup.Key,
+                            LibraryTreeNodeType.Family,
+                            categoryNode,
+                            familyName : familyGroup.Key,
+                            categoryName:group.Key,
+                            onSelected: node => SelectedNode = node));
+
+                    categoryNode.ReplaceChildren(familyNodes);
                     return categoryNode;
                 });
 
@@ -432,41 +447,86 @@ namespace RevitFamilyBrowser.ViewModels
 
         private void RefreshFromProjectFamilies(LibraryTreeNodeViewModel selectedNode)
         {
-            var families = _projectFamilies.AsEnumerable();
+            var filtered = _projectFamilies.AsEnumerable();
             if (!string.IsNullOrWhiteSpace(selectedNode.CategoryName))
-                families = families.Where(f => string.Equals(f.CategoryName, selectedNode.CategoryName, StringComparison.OrdinalIgnoreCase));
+                filtered = filtered.Where(f => string.Equals(f.CategoryName, selectedNode.CategoryName, StringComparison.OrdinalIgnoreCase));
 
-            if (!string.IsNullOrWhiteSpace(selectedNode.FamilyName))
-                families = families.Where(f => string.Equals(f.FamilyName, selectedNode.FamilyName, StringComparison.OrdinalIgnoreCase));
-
-            foreach (var family in families)
+            if (selectedNode.NodeType == LibraryTreeNodeType.Family && !string.IsNullOrWhiteSpace(selectedNode.FamilyName))
             {
-                var displayName = !string.IsNullOrWhiteSpace(family.FamilyName) ? family.FamilyName : family.Name;
-                var vm = new FamilyThumbItemViewModel(family.FullPath, displayName)
-                {
-                    ShowLoadPlaceActions = false,
-                    LoadCommand = null,
-                    PlaceCommand = null
-                };
-                FamilyFiles.Add(vm);
+                filtered = filtered.Where(f => string.Equals(f.FamilyName, selectedNode.FamilyName, StringComparison.OrdinalIgnoreCase));
 
-                if (!string.IsNullOrWhiteSpace(displayName))
+                var typeItems = filtered
+                    .Where(f => !string.IsNullOrWhiteSpace(f.FamilyName))
+                    .GroupBy(f => (f.TypeName ?? string.Empty) + "|" + (f.FamilyName ?? string.Empty), StringComparer.OrdinalIgnoreCase)
+                    .Select(g => g.First())
+                    .OrderBy(f => f.TypeName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (typeItems.Count == 0)
                 {
-                    var expectedSeletedNode = selectedNode;
-                    RevitProjectFamilyThumbnailProvider.RequestThumbnail(displayName, 256, 256, result =>
+                    AddProjectFamilyCard(new ProjectFamilyNodeItem
                     {
-                        _ui.BeginInvoke(new Action(() =>
-                        {
-                            if (CurrentLibraryMode != LibraryMode.Project) return;
-                            if (!ReferenceEquals(SelectedNode, expectedSeletedNode)) return;
-                            if (result == null || result.ImageBytes == null || result.ImageBytes.Length == 0) return;
-
-                            var image = TryCreateBitmap(result.ImageBytes);
-                            if (image != null)
-                                vm.Thumbnail = image;
-                        }));
-                    });
+                        Name = selectedNode.FamilyName,
+                        FamilyName = selectedNode.FamilyName,
+                        CategoryName = selectedNode.CategoryName,
+                        TypeName = null,
+                        FullPath = null,
+                        IsLoadableFamily = true,
+                    }, selectedNode);
+                    return;
                 }
+
+                foreach (var item in typeItems)
+                    AddProjectFamilyCard(item,selectedNode);
+
+                return;
+            }
+
+            var familyItems = filtered
+                .GroupBy(f => (f.FamilyName ?? string.Empty) + "|" + (f.FamilyName ?? string.Empty), StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.OrderByDescending(x => x.IsLoadableFamily).First())
+                .OrderBy(f => f.TypeName ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var family in familyItems)
+                AddProjectFamilyCard(family, selectedNode);
+        }
+
+        private void AddProjectFamilyCard(ProjectFamilyNodeItem family, LibraryTreeNodeViewModel selectedNode)
+        {
+            var displayName = !string.IsNullOrWhiteSpace(family.TypeName)
+                ? family.TypeName
+                : (!string.IsNullOrWhiteSpace(family.FamilyName) ? family.FamilyName : family.Name);
+
+            var vm = new FamilyThumbItemViewModel(family.FamilyName, displayName)
+            {
+                ShowLoadPlaceActions = false,
+                LoadCommand = null,
+                PlaceCommand = null,
+                CanReadProjectParameters = family.IsLoadableFamily && string.IsNullOrWhiteSpace(family.FamilyName)
+            };
+
+            if (!vm.CanReadProjectParameters)
+                vm.ParametersStatus = "系统类型/类型节点，暂不支持族参数读取";
+
+            FamilyFiles.Add(vm);
+
+            if (!string.IsNullOrWhiteSpace(family.FamilyName) && family.IsLoadableFamily)
+            {
+                var expectedSelectedNode = selectedNode;
+                RevitProjectFamilyThumbnailProvider.RequestThumbnail(family.FamilyName, 256, 256, result =>
+                {
+                    _ui.BeginInvoke(new Action(() =>
+                    {
+                        if (CurrentLibraryMode != LibraryMode.Project) return;
+                        if (!ReferenceEquals(SelectedNode, expectedSelectedNode)) return;
+                        if (result == null || result.ImageBytes == null || result.ImageBytes.Length == 0) return;
+
+                        var image = TryCreateBitmap(result.ImageBytes);
+                        if (image != null)
+                            vm.Thumbnail = image;
+                    }));
+                });
             }
         }
 
@@ -560,6 +620,13 @@ namespace RevitFamilyBrowser.ViewModels
         {
             if (item == null) return;
 
+            if(CurrentLibraryMode == LibraryMode.Project && !item.CanReadProjectParameters)
+            {
+                item.Parameters.Clear();
+                item.ParametersStatus = "系统类型，暂不支持族参数读取";
+                return;
+            }
+
             item.ParametersStatus = "正在读取参数...";
             item.Parameters.Clear();
 
@@ -619,6 +686,8 @@ namespace RevitFamilyBrowser.ViewModels
         public string Name { get; set; }
         public string CategoryName { get; set; }
         public string FamilyName { get; set; }
+        public string TypeName { get; set; }
         public string FullPath { get; set; }
+        public bool IsLoadableFamily { get; set; }
     }
 }

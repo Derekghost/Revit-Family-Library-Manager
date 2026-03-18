@@ -40,6 +40,17 @@ namespace RevitFamilyBrowser.ViewModels
                 OnpropertyChanged();
             }
         }
+        private bool _canReadProjectParameters = true;
+        public bool CanReadProjectParameters
+        {
+            get => _canReadProjectParameters;
+            set
+            {
+                if (_canReadProjectParameters == value) return;
+                _canReadProjectParameters = value;
+                OnpropertyChanged();
+            }
+        }
         public ICommand LoadCommand { get; set; }
 
         public ICommand PlaceCommand { get; set; }
