@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 using System.Windows.Data;
+using System.Diagnostics;
 using RevitFamilyBrowser.ViewModels;
 using RevitFamilyBrowser.Properties;
 using RevitFamilyBrowser.RevitBridge;
@@ -231,6 +232,7 @@ namespace RevitFamilyBrowser.ViewModels
                     CategoryName = family.CategoryName,
                     FullPath = null,
                     TypeName = family.TypeName,
+                    ElementTypeId = family.ElementTypeId,
                     IsLoadableFamily = family.IsLoadableFamily
                 });
             }
@@ -471,6 +473,7 @@ namespace RevitFamilyBrowser.ViewModels
                         CategoryName = selectedNode.CategoryName,
                         TypeName = null,
                         FullPath = null,
+                        ElementTypeId = 0,
                         IsLoadableFamily = true,
                     }, selectedNode);
                     return;
@@ -511,10 +514,10 @@ namespace RevitFamilyBrowser.ViewModels
 
             FamilyFiles.Add(vm);
 
-            if (!string.IsNullOrWhiteSpace(family.FamilyName) && family.IsLoadableFamily)
+            if (family.ElementTypeId > 0)
             {
                 var expectedSelectedNode = selectedNode;
-                RevitProjectFamilyThumbnailProvider.RequestThumbnail(family.FamilyName, 256, 256, result =>
+                RevitProjectFamilyThumbnailProvider.RequestThumbnail(family.ElementTypeId, family.FamilyName, 256, 256, result =>
                 {
                     _ui.BeginInvoke(new Action(() =>
                     {
@@ -540,14 +543,16 @@ namespace RevitFamilyBrowser.ViewModels
                 {
                     var bitmap = new BitmapImage();
                     bitmap.BeginInit();
+                    bitmap.StreamSource = ms;
                     bitmap.CacheOption = BitmapCacheOption.OnLoad;
                     bitmap.EndInit();
                     bitmap.Freeze();
                     return bitmap;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.WriteLine($"[TryCreateBitmap] Failed to create thumbnail bitmap. Bytes={imageBytes.Length}, Error={ex.Message}");
                 return null;
             }
         }
@@ -685,6 +690,7 @@ namespace RevitFamilyBrowser.ViewModels
     {
         public string Name { get; set; }
         public string CategoryName { get; set; }
+        public int ElementTypeId { get; set; }
         public string FamilyName { get; set; }
         public string TypeName { get; set; }
         public string FullPath { get; set; }

@@ -21,14 +21,14 @@ namespace RevitFamilyBrowser.RevitBridge
             _externalEvent = ExternalEvent.Create(_handler);
         }
 
-        public static void RequestThumbnail(string familyName, int width, int height, Action<ProjectFamilyThumbnailResult> callback)
+        public static void RequestThumbnail(int elementTypeId, string familyName, int width, int height, Action<ProjectFamilyThumbnailResult> callback)
         {
-            if(_externalEvent == null || string.IsNullOrWhiteSpace(familyName) || callback == null) return;
+            if(_externalEvent == null || callback == null || elementTypeId <= 0) return;
 
             var safeWidth = width > 0 ? width : 256;
             var safeHeight = height > 0 ? height : 256;
 
-            _handler.SetRequest(familyName.Trim(), safeWidth, safeHeight, callback);
+            _handler.SetRequest(elementTypeId, familyName, safeWidth, safeHeight, callback);
             _externalEvent.Raise();
         }
 
@@ -38,18 +38,20 @@ namespace RevitFamilyBrowser.RevitBridge
 
             private class ThumbnailRequest
             {
+                public int ElementTypeId { get; set; }
                 public string FamilyName { get; set; }
                 public int Width { get; set; }
                 public int Height { get; set; }
                 public Action<ProjectFamilyThumbnailResult> Callback { get; set; }
             }
 
-            public void SetRequest(string familyName, int width, int height, Action<ProjectFamilyThumbnailResult> callback)
+            public void SetRequest(int elementTypeId, string familyName, int width, int height, Action<ProjectFamilyThumbnailResult> callback)
             {
                 lock (_requests)
                 {
                     _requests.Enqueue(new ThumbnailRequest
                     {
+                        ElementTypeId = elementTypeId,
                         FamilyName = familyName,
                         Width = width,
                         Height = height,
@@ -67,10 +69,11 @@ namespace RevitFamilyBrowser.RevitBridge
                         request = _requests.Dequeue();
                 }
 
-                if (request == null || request.Callback == null || string.IsNullOrWhiteSpace(request.FamilyName)) return;
+                if (request == null || request.Callback == null || request.ElementTypeId <= 0) return;
 
                 var cb = request.Callback;
                 var familyName = request.FamilyName;
+                var elementTypeId = request.ElementTypeId;
                 var width = request.Width;
                 var height = request.Height;
                 try
@@ -86,33 +89,7 @@ namespace RevitFamilyBrowser.RevitBridge
                         return;
                     }
 
-                    var family = new FilteredElementCollector(doc)
-                        .OfClass(typeof(Family))
-                        .Cast<Family>()
-                        .FirstOrDefault(f => string.Equals(f.Name, familyName, StringComparison.OrdinalIgnoreCase));
-
-                    if(family == null)
-                    {
-                        cb(new ProjectFamilyThumbnailResult
-                        {
-                            FamilyName = familyName,
-                            StatusMessage = "未找到项目族"
-                        });
-                        return;
-                    }
-
-                    var symbolId = family.GetFamilySymbolIds().FirstOrDefault();
-                    if (symbolId == null || symbolId == ElementId.InvalidElementId)
-                    {
-                        cb(new ProjectFamilyThumbnailResult
-                        {
-                            FamilyName = familyName,
-                            StatusMessage = "该族没有可预览类型"
-                        });
-                        return;
-                    }
-
-                    var type = doc.GetElement(symbolId) as ElementType;
+                    var type = doc.GetElement(new ElementId(elementTypeId)) as ElementType;
                     if (type == null)
                     {
                         cb(new ProjectFamilyThumbnailResult

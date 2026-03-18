@@ -61,6 +61,11 @@ namespace RevitFamilyBrowser.RevitBridge
                             FamilyName = f.Name,
                             CategoryName = f.FamilyCategory != null ? f.FamilyCategory.Name : string.Empty,
                             FamilyId = f.Id != null ? f.Id.IntegerValue : 0,
+                            ElementTypeId = f.GetFamilySymbolIds()
+                                .Where(id => id != null && id != ElementId.InvalidElementId)
+                                .Select(id => id.IntegerValue)
+                                .DefaultIfEmpty(0)
+                                .FirstOrDefault(),
                             IsLoadableFamily = true
                         })
                         .ToList();
@@ -79,6 +84,7 @@ namespace RevitFamilyBrowser.RevitBridge
                             TypeName = t.Name ?? string.Empty,
                             CategoryName = t.Category.Name,
                             FamilyId = t.Id != null ? t.Id.IntegerValue : 0,
+                            ElementTypeId = t.Id != null ? t.Id.IntegerValue : 0,
                             IsLoadableFamily = false
                         })
                         .Where(t => !string.IsNullOrWhiteSpace(t.CategoryName) && !string.IsNullOrWhiteSpace(t.FamilyName))
@@ -123,6 +129,7 @@ namespace RevitFamilyBrowser.RevitBridge
         public string FamilyName { get; set; }
         public string CategoryName { get; set; }
         public int FamilyId { get; set; }
+        public int ElementTypeId { get; set; }
         public string TypeName { get; set; }
         public bool IsLoadableFamily { get; set; }
     }
