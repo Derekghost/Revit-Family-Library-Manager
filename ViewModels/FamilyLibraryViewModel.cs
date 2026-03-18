@@ -37,6 +37,31 @@ namespace RevitFamilyBrowser.ViewModels
         private CancellationTokenSource _localScanCancellation;
         private int _localScanRunId;
 
+        private bool _isLocalScanInProgress;
+        public bool IsLocalScanInProgress
+        {
+            get => _isLocalScanInProgress;
+            private set
+            {
+                if (_isLocalScanInProgress == value) return;
+                _isLocalScanInProgress = value;
+                OnpropertyChanged();
+            }
+        }
+
+        private string _localScanProgressText = "等待扫描";
+        public string LocalScanProgressText
+        {
+            get => _localScanProgressText;
+            private set
+            {
+                if (_localScanProgressText == value) return;
+                _localScanProgressText = value;
+                OnpropertyChanged();
+            }
+        }
+        public bool ShowLocalScanStatus => CurrentLibraryMode == LibraryMode.Local;
+
         // ✅ 新增：根目录路径（可绑定到UI显示）
         private string _rootPath;
         public string RootPath
@@ -80,6 +105,7 @@ namespace RevitFamilyBrowser.ViewModels
                 _currentLibraryMode = value;
                 OnpropertyChanged();
                 OnpropertyChanged(nameof(ToggleLibraryModeText));
+                OnpropertyChanged(nameof(ShowLocalScanStatus));
                 BrowseRootCommand?.RaiseCanExecuteChanged();
                 OpenLastRootCommand?.RaiseCanExecuteChanged();
             }
@@ -329,6 +355,7 @@ namespace RevitFamilyBrowser.ViewModels
 
             if (string.IsNullOrWhiteSpace(rootPath))
             {
+                ResetLocalScanProgress("等待选择目录");
                 UpdateStatusText("请选择族库目录");
                 FamilyFilesView?.Refresh();
                 return;
@@ -336,6 +363,7 @@ namespace RevitFamilyBrowser.ViewModels
 
             if (!Directory.Exists(rootPath))
             {
+                ResetLocalScanProgress("目录无效");
                 UpdateStatusText("目录不存在或无权限访问： " + rootPath);
                 // 仍然显示一个根节点，让用户知道你在看哪个路径
                 var invalidRoot = new FolderNodeViewModel(rootPath, null, true, this);
@@ -344,6 +372,7 @@ namespace RevitFamilyBrowser.ViewModels
             }
 
             UpdateStatusText ("Root: " + rootPath);
+            ResetLocalScanProgress("等待扫描");
             var rootNode = CreateFolderNode(rootPath, null, true);
             RootNodes.Add(rootNode);
             SelectedNode = rootNode;
@@ -587,6 +616,8 @@ namespace RevitFamilyBrowser.ViewModels
             }
 
             UpdateStatusText($"正在扫描：已发现 0 个文件 | 当前目录：{dir}");
+            IsLocalScanInProgress = true;
+            LocalScanProgressText = "正在扫描：一发现0个文件";
 
             const int batchSize = 100;
             var pendingBatch = new List<string>(batchSize);
@@ -688,6 +719,10 @@ namespace RevitFamilyBrowser.ViewModels
                 FamilyFilesView?.Refresh();
                 var tail = isFinalBatch ? " | 扫描完成" : "";
                 UpdateStatusText($"正在扫描：已发现 {discoveredCount} 个文件 | 当前目录：{currentDir}{tail}");
+                LocalScanProgressText = isFinalBatch
+                    ? $"扫描完成：共发现 {discoveredCount} 个文件"
+                    : $"正在扫描：已发现 {discoveredCount} 个文件";
+                IsLocalScanInProgress = !isFinalBatch;
             }));
 
             TrackPendingUiOperation(op);
@@ -700,6 +735,11 @@ namespace RevitFamilyBrowser.ViewModels
                 if (!IsScanStillValid(scanVersion, runId, token)) return;
                 FamilyFilesView?.Refresh();
                 UpdateStatusText(message);
+
+                var finished = message.Contains("完成") || message.Contains("取消") || message.Contains("中断");
+                LocalScanProgressText = message;
+                if (finished)
+                    IsLocalScanInProgress = false;
             }));
 
             TrackPendingUiOperation(op);
@@ -785,6 +825,15 @@ namespace RevitFamilyBrowser.ViewModels
 
             if (!string.IsNullOrWhiteSpace(reason))
                 UpdateStatusText(reason);
+
+            IsLocalScanInProgress = false;
+            LocalScanProgressText = reason ?? "扫描已停止";
+        }
+
+        private void ResetLocalScanProgress(string text)
+        {
+            IsLocalScanInProgress = false;
+            LocalScanProgressText = text;
         }
 
         private void AddLocalFamilyCard(string fullPath)
