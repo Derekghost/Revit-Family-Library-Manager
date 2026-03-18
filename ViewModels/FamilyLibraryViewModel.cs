@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 using System.Windows.Data;
@@ -31,6 +32,10 @@ namespace RevitFamilyBrowser.ViewModels
         private readonly List<ProjectFamilyNodeItem> _projectFamilies = new List<ProjectFamilyNodeItem>();
         private int _scanVersion;
         private readonly Dispatcher _ui;
+        private readonly object _scanLock = new object();
+        private readonly List<DispatcherOperation> _pendingScanUiOperations = new List<DispatcherOperation>();
+        private CancellationTokenSource _localScanCancellation;
+        private int _localScanRunId;
 
         // ✅ 新增：根目录路径（可绑定到UI显示）
         private string _rootPath;
@@ -89,6 +94,7 @@ namespace RevitFamilyBrowser.ViewModels
             set
             {
                 if (_selectedNode == value) return;
+                CancelLocalScan("节点切换，已取消上一次扫描");
                 _selectedNode = value;
                 OnpropertyChanged();
                 RefreshFamilyFiles();
@@ -180,6 +186,7 @@ namespace RevitFamilyBrowser.ViewModels
         }
         private void SwitchToLocalLibrary()
         {
+            CancelLocalScan("切换到本地族库，已取消上一次扫描");
             CurrentLibraryMode = LibraryMode.Local;
 
             var pathToUse = RootPath;
@@ -191,6 +198,7 @@ namespace RevitFamilyBrowser.ViewModels
         }
         private void SwitchToProjectLibrary()
         {
+            CancelLocalScan("切换到项目族库，已取消上一次扫描");
             CurrentLibraryMode = LibraryMode.Project;
             OpenLastRootCommand.RaiseCanExecuteChanged();
 
@@ -310,6 +318,7 @@ namespace RevitFamilyBrowser.ViewModels
 
         private void SetRootPath(string rootPath)
         {
+            CancelLocalScan("目录已变更，已取消上一次扫描");
             RootPath = rootPath;
 
             // 重置界面数据
@@ -427,6 +436,7 @@ namespace RevitFamilyBrowser.ViewModels
 
         private void RefreshFamilyFiles()
         {
+            CancelLocalScan("视图已切换，已取消上一次扫描");
             FamilyFiles.Clear();
             SelectedFamily = null;
             IsDetailsPaneOpen = false;
@@ -566,58 +576,240 @@ namespace RevitFamilyBrowser.ViewModels
             }
 
             int myVersion = ++_scanVersion; // 版本号，确保异步结果不会覆盖后续的刷新
+            CancellationToken token;
+            int runId;
 
-            // 后台递归扫描（避免 UI 卡死）
+            lock (_scanLock)
+            {
+                _localScanCancellation = new CancellationTokenSource();
+                token = _localScanCancellation.Token;
+                runId = ++_localScanRunId;
+            }
+
+            UpdateStatusText($"正在扫描：已发现 0 个文件 | 当前目录：{dir}");
+
+            const int batchSize = 100;
+            var pendingBatch = new List<string>(batchSize);
+            var discoveredCount = 0;
+            var currentDir = dir;
+
             Task.Run(() =>
             {
-                var list = new List<string>();
                 try
                 {
-                    foreach (var f in Directory.EnumerateFiles(dir, "*.rfa", SearchOption.AllDirectories))
-                        list.Add(f);
+                    foreach (var file in EnumerateRfaFiles(dir, token, d => currentDir = d))
+                    {
+                        token.ThrowIfCancellationRequested();
+                        pendingBatch.Add(file);
+                        discoveredCount++;
+
+                        if (pendingBatch.Count >= batchSize)
+                        {
+                            var batch = pendingBatch.ToArray();
+                            pendingBatch.Clear();
+                            ScheduleScanUiUpdate(myVersion, runId, token, batch, discoveredCount, currentDir, false);
+                        }
+                    }
+
+                    if (pendingBatch.Count > 0)
+                    {
+                        var batch = pendingBatch.ToArray();
+                        pendingBatch.Clear();
+                        ScheduleScanUiUpdate(myVersion, runId, token, batch, discoveredCount, currentDir, true);
+                    }
+                    else
+                    {
+                        ScheduleScanUiStatus(myVersion, runId, token, $"扫描完成：共发现 {discoveredCount} 个文件 | 当前目录：{currentDir}");
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    ScheduleScanUiStatus(myVersion, runId, token, $"扫描已取消：已发现 {discoveredCount} 个文件 | 当前目录：{currentDir} | 已取消");
                 }
                 catch
                 {
-                    // 权限/路径异常直接忽略
+                    ScheduleScanUiStatus(myVersion, runId, token, $"扫描中断：已发现 {discoveredCount} 个文件 | 当前目录：{currentDir}");
                 }
-                return list;
-            })
-            .ContinueWith(t =>
+            }, token);
+        }
+
+        private IEnumerable<string> EnumerateRfaFiles(string rootDir, CancellationToken token, Action<string> onDirChanged)
+        {
+            var stack = new Stack<string>();
+            stack.Push(rootDir);
+
+            while (stack.Count > 0)
             {
-                _ui.BeginInvoke(new Action(() =>
+                token.ThrowIfCancellationRequested();
+                var current = stack.Pop();
+                onDirChanged?.Invoke(current);
+
+                IEnumerable<string> files;
+
+                try
                 {
-                    if (myVersion != _scanVersion) return;
+                    files = Directory.EnumerateFiles(current, "*.rfa", SearchOption.TopDirectoryOnly);
+                }
+                catch
+                {
+                    files = Array.Empty<string>();
+                }
 
-                    var files = (t.Status == TaskStatus.RanToCompletion && t.Result != null) ? t.Result : new List<string>();
+                foreach (var file in files)
+                {
+                    token.ThrowIfCancellationRequested();
+                    yield return file;
+                }
 
-                    foreach (var f in files)
-                    {
-                        var name = Path.GetFileNameWithoutExtension(f);
-                        var vm = new FamilyThumbItemViewModel(f, name)
-                        {
-                            ShowLoadPlaceActions = true
-                        };
+                IEnumerable<string> subDirs;
+                try
+                {
+                    subDirs = Directory.EnumerateDirectories(current);
+                }
+                catch
+                {
+                    subDirs = Array.Empty<string>();
+                }
 
-                        vm.LoadCommand = new RelayCommand(_ =>
-                        {
-                            RevitBridge.RevitFamilyLoader.RequestLoad(vm.FullPath);
-                        });
+                foreach (var subDir in subDirs)
+                    stack.Push(subDir);
+            }
+        }
 
-                        vm.PlaceCommand = new RelayCommand(_ =>
-                        {
-                            RevitBridge.RevitFamilyPlacer.RequestPlace(vm.FileName, vm.FullPath);
-                        });
+        private void ScheduleScanUiUpdate(int scanVersion, int runId, CancellationToken token, string[] files, int discoveredCount,string currentDir, bool isFinalBatch)
+        {
+            var op = _ui.BeginInvoke(new Action(() =>
+            {
+                if (!IsScanStillValid(scanVersion, runId, token)) return;
 
-                        FamilyFiles.Add(vm);
+                foreach (var file in files)
+                    AddLocalFamilyCard(file);
 
-                        ThumbnailQueue.Enqueue(f, 256, img =>
-                        {
-                            if (img != null) vm.Thumbnail = img;
-                        });
-                    }
+                FamilyFilesView?.Refresh();
+                var tail = isFinalBatch ? " | 扫描完成" : "";
+                UpdateStatusText($"正在扫描：已发现 {discoveredCount} 个文件 | 当前目录：{currentDir}{tail}");
+            }));
 
-                    FamilyFilesView?.Refresh();
-                }));
+            TrackPendingUiOperation(op);
+        }
+
+        private void ScheduleScanUiStatus(int scanVersion, int runId, CancellationToken token, string message)
+        {
+            var op = _ui.BeginInvoke(new Action(() =>
+            {
+                if (!IsScanStillValid(scanVersion, runId, token)) return;
+                FamilyFilesView?.Refresh();
+                UpdateStatusText(message);
+            }));
+
+            TrackPendingUiOperation(op);
+        }
+
+        private void TrackPendingUiOperation(DispatcherOperation operation)
+        {
+            if (operation == null) return;
+
+            lock (_scanLock)
+            {
+                _pendingScanUiOperations.Add(operation);
+            }
+
+            operation.Completed += (_, __) =>
+            {
+                lock (_scanLock)
+                {
+                    _pendingScanUiOperations.Remove(operation);
+                }
+            };
+            operation.Aborted += (_, __) =>
+            {
+                lock (_scanLock)
+                {
+                    _pendingScanUiOperations.Remove(operation);
+                }
+            };
+        }
+
+        private bool IsScanStillValid(int scanVersion, int runId, CancellationToken token)
+        {
+            if(token.IsCancellationRequested) return false;
+            if(scanVersion != _scanVersion) return false;
+
+            lock (_scanLock)
+            {
+                return runId == _localScanRunId;
+            }
+        }
+
+        private void CancelLocalScan(string reason)
+        {
+            CancellationTokenSource cts = null;
+            DispatcherOperation[] pendingOperations;
+
+            lock (_scanLock)
+            {
+                cts = _localScanCancellation;
+                _localScanCancellation = null;
+
+                pendingOperations = _pendingScanUiOperations.ToArray();
+                _pendingScanUiOperations.Clear();
+            }
+
+            if (cts != null)
+            {
+                try
+                {
+                    if (!cts.IsCancellationRequested)
+                        cts.Cancel();
+                }
+                catch
+                {
+                }
+                finally
+                {
+                    cts.Dispose();
+                }
+            }
+
+            foreach (var op in pendingOperations)
+            {
+                try
+                {
+                    if (op != null && op.Status == DispatcherOperationStatus.Pending)
+                        op.Abort();
+                }
+                catch
+                {
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(reason))
+                UpdateStatusText(reason);
+        }
+
+        private void AddLocalFamilyCard(string fullPath)
+        {
+            var name = Path.GetFileNameWithoutExtension(fullPath);
+            var vm = new FamilyThumbItemViewModel(fullPath, name)
+            {
+                ShowLoadPlaceActions = true
+            };
+
+            vm.LoadCommand = new RelayCommand(_ =>
+            {
+                RevitBridge.RevitFamilyLoader.RequestLoad(vm.FullPath);
+            });
+
+            vm.PlaceCommand = new RelayCommand(_ =>
+            {
+                RevitBridge.RevitFamilyPlacer.RequestPlace(vm.FileName, vm.FullPath);
+            });
+
+            FamilyFiles.Add(vm);
+
+            ThumbnailQueue.Enqueue(fullPath, 256, img =>
+            {
+                if (img != null) vm.Thumbnail = img;
             });
         }
 
