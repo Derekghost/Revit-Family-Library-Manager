@@ -15,6 +15,7 @@ using RevitFamilyBrowser.Properties;
 using RevitFamilyBrowser.RevitBridge;
 using System.Data;
 using System.Windows.Media.Imaging;
+using RevitFamilyBrowser.Data;
 
 namespace RevitFamilyBrowser.ViewModels
 {
@@ -36,6 +37,7 @@ namespace RevitFamilyBrowser.ViewModels
         private readonly List<DispatcherOperation> _pendingScanUiOperations = new List<DispatcherOperation>();
         private CancellationTokenSource _localScanCancellation;
         private int _localScanRunId;
+        private readonly SQLiteLibraryRepository _libraryRepository;
 
         private bool _isLocalScanInProgress;
         public bool IsLocalScanInProgress
@@ -187,6 +189,16 @@ namespace RevitFamilyBrowser.ViewModels
             // ✅ 当前：不固定路径（rootPath 传 null 就等待用户选择）
             var initialPath = string.IsNullOrWhiteSpace(rootPath) ? null : rootPath;
             SetRootPath(string.IsNullOrWhiteSpace(initialPath) ? null : initialPath);
+
+            try
+            {
+                var dbPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RevitFamilyBrowser", "library.db");
+                _libraryRepository = new SQLiteLibraryRepository(dbPath);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[SQLite] Init failed: {ex.Message}");
+            }
         }
 
         public void SetProjectFamilies(IEnumerable<ProjectFamilyNodeItem> families)
@@ -856,9 +868,33 @@ namespace RevitFamilyBrowser.ViewModels
 
             FamilyFiles.Add(vm);
 
+            TryUpsertLocalFamily(fullPath, name);
+
             ThumbnailQueue.Enqueue(fullPath, 256, img =>
             {
                 if (img != null) vm.Thumbnail = img;
+            });
+        }
+
+        private void TryUpsertLocalFamily(string fullPath, string familyName)
+        {
+            if (_libraryRepository == null || string.IsNullOrWhiteSpace(fullPath)) return;
+
+            Task.Run(() =>
+            {
+                try
+                {
+                    var fileInfo = new FileInfo(fullPath);
+                    var folder = fileInfo.DirectoryName ?? string.Empty;
+                    var lastWriteUtc = fileInfo.Exists ? fileInfo.LastAccessTimeUtc : DateTime.UtcNow;
+                    var fileSize = fileInfo.Exists ? fileInfo.Length : 0L;
+
+                    _libraryRepository.UpsertFamily(fullPath, familyName, folder, lastWriteUtc, fileSize);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[SQLite] Upsert failed. File={fullPath}, Error={ex.Message}");
+                }
             });
         }
 
