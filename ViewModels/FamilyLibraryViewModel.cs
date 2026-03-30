@@ -16,6 +16,7 @@ using RevitFamilyBrowser.RevitBridge;
 using System.Data;
 using System.Windows.Media.Imaging;
 using RevitFamilyBrowser.Data;
+using System.Windows;
 
 namespace RevitFamilyBrowser.ViewModels
 {
@@ -94,6 +95,7 @@ namespace RevitFamilyBrowser.ViewModels
         // ✅ 新增：打开上一次文件夹（左侧按钮绑定）
         public RelayCommand BrowseRootCommand { get; }
         public RelayCommand OpenLastRootCommand { get; }
+        public RelayCommand DeleteFolderDbRecordsCommand { get; }
 
         public RelayCommand ToggleLibraryModeCommand { get; }
 
@@ -110,6 +112,7 @@ namespace RevitFamilyBrowser.ViewModels
                 OnpropertyChanged(nameof(ShowLocalScanStatus));
                 BrowseRootCommand?.RaiseCanExecuteChanged();
                 OpenLastRootCommand?.RaiseCanExecuteChanged();
+                DeleteFolderDbRecordsCommand?.RaiseCanExecuteChanged();
             }
         }
 
@@ -125,6 +128,7 @@ namespace RevitFamilyBrowser.ViewModels
                 CancelLocalScan("节点切换，已取消上一次扫描");
                 _selectedNode = value;
                 OnpropertyChanged();
+                DeleteFolderDbRecordsCommand?.RaiseCanExecuteChanged();
                 RefreshFamilyFiles();
             }
         }
@@ -179,6 +183,7 @@ namespace RevitFamilyBrowser.ViewModels
 
             BrowseRootCommand = new RelayCommand(_ => BrowseForRootFolder(), _ => CurrentLibraryMode == LibraryMode.Local);
             OpenLastRootCommand = new RelayCommand(_ => OpenLastRootFolder(), _ => CurrentLibraryMode == LibraryMode.Local && HasLastRootPath());
+            DeleteFolderDbRecordsCommand = new RelayCommand(_ => DeleteSelectedFolderRecordsFromDatabase(), _ => CanDeleteSelectedFolderRecordsFromDatabase());
             ToggleLibraryModeCommand = new RelayCommand(_ => ToggleLibraryMode());
             OpenDetailsCommand = new RelayCommand(OpenDetails);
             CloseDetailsCommand = new RelayCommand(_ => IsDetailsPaneOpen = false);
@@ -199,6 +204,8 @@ namespace RevitFamilyBrowser.ViewModels
             {
                 Debug.WriteLine($"[SQLite] Init failed: {ex.Message}");
             }
+
+            DeleteFolderDbRecordsCommand.RaiseCanExecuteChanged();
         }
 
         public void SetProjectFamilies(IEnumerable<ProjectFamilyNodeItem> families)
@@ -846,6 +853,58 @@ namespace RevitFamilyBrowser.ViewModels
         {
             IsLocalScanInProgress = false;
             LocalScanProgressText = text;
+        }
+
+        private bool CanDeleteSelectedFolderRecordsFromDatabase()
+        {
+            if (CurrentLibraryMode != LibraryMode.Local) return false;
+            if (_libraryRepository == null) return false;
+            if (SelectedNode == null || SelectedNode.NodeType != LibraryTreeNodeType.Folder) return false;
+            if (string.IsNullOrWhiteSpace(SelectedNode.FullPath)) return false;
+            return true;
+        }
+
+        private void DeleteSelectedFolderRecordsFromDatabase()
+        {
+            if (!CanDeleteSelectedFolderRecordsFromDatabase()) return;
+
+            var selectedFolder = SelectedNode.FullPath;
+            var confirm = MessageBox.Show(
+                $"确定删除数据库中该路径及其子目录的索引记录吗？\n{selectedFolder}",
+                "清理数据库记录",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (confirm != MessageBoxResult.Yes) return;
+
+            UpdateStatusText("正在清理数据库记录...");
+            Task.Run(() =>
+            {
+                int deletedRows = 0;
+                string error = null;
+                try
+                {
+                    deletedRows = _libraryRepository.DeleteByFolderPath(selectedFolder, includeSubfolders: true);
+                }
+                catch (Exception ex)
+                {
+                    error = ex.Message;
+                    Debug.WriteLine($"[SQLite] Delete failed. Folder={selectedFolder}, Error={ex.Message}");
+                }
+
+                _ui.BeginInvoke(new Action(() =>
+                {
+                    if (!string.IsNullOrWhiteSpace(error))
+                    {
+                        UpdateStatusText($"数据库清理失败：{error}");
+                        MessageBox.Show($"数据库清理失败：{error}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        return;
+                    }
+
+                    UpdateStatusText($"数据库清理完成：删除 {deletedRows} 条记录 | 路径：{selectedFolder}");
+                    MessageBox.Show($"已删除 {deletedRows} 条数据库记录。", "清理完成", MessageBoxButton.OK, MessageBoxImage.Information);
+                }));
+            });
         }
 
         private void AddLocalFamilyCard(string fullPath)

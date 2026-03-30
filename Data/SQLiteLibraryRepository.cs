@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.IO;
 
 namespace RevitFamilyBrowser.Data
 {
@@ -83,6 +84,40 @@ ORDER BY file_name;";
                 }
             }
             return result;
+        }
+
+        public int DeleteByFolderPath(string folderPath, bool includeSubfolders = true)
+        {
+            if (string.IsNullOrWhiteSpace(folderPath)) return 0;
+
+            var normalizedFolder = folderPath.ToLowerInvariant();
+            var prefix = normalizedFolder + Path.DirectorySeparatorChar;
+
+            lock (_writeLock)
+            {
+                using (var conn = new SQLiteConnection(_connectionString))
+                {
+                    conn.Open();
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        if (includeSubfolders)
+                        {
+                            cmd.CommandText = @"
+DELETE FROM families
+WHERE folder_path = @folder_path
+   OR folder_path LIKE @folder_prefix;";
+                            cmd.Parameters.AddWithValue("@folder_prefix", prefix + "%");
+                        }
+                        else
+                        {
+                            cmd.CommandText = @"DELETE FROM families WHERE folder_path = @folder_path;";
+                        }
+
+                        cmd.Parameters.AddWithValue("@folder_path", normalizedFolder);
+                        return cmd.ExecuteNonQuery();
+                    }
+                }
+            }
         }
     }
 }

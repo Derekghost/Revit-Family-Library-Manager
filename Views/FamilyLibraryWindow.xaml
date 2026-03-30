@@ -41,6 +41,11 @@
                                 MinWidth="120"
                                 Margin="8,0,0,0"
                                 Command="{Binding ToggleLibraryModeCommand}"/>
+                        <Button Content="清理当前目录数据库"
+                                Height="26"
+                                MinWidth="140"
+                                Margin="8,0,0,0"
+                                Command="{Binding DeleteFolderDbRecordsCommand}"/>
                     </StackPanel>
                     <Border DockPanel.Dock="Bottom"
                             Margin="8,4,8,8"
