@@ -9,6 +9,7 @@ namespace RevitFamilyBrowser.Data
     {
         private readonly string _connectionString;
         private readonly object _writeLock = new object();
+        private static readonly char[] SeparatorChars = new[] {Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar};
 
         public SQLiteLibraryRepository(string dbPath)
         {
@@ -18,6 +19,7 @@ namespace RevitFamilyBrowser.Data
 
         public void UpsertFamily(string filePath, string fileName, string folderPath, DateTime lastWriteUtc, long fileSize)
         {
+            var normalizedFolderPath = NormalizeFolderPath(folderPath);
             lock (_writeLock)
             {
                 using (var conn = new SQLiteConnection(_connectionString))
@@ -36,7 +38,7 @@ ON CONFLICT(file_path) DO UPDATE SET
 
                         cmd.Parameters.AddWithValue("@file_path", filePath ?? string.Empty);
                         cmd.Parameters.AddWithValue("@file_name", fileName ?? string.Empty);
-                        cmd.Parameters.AddWithValue("@folder_path", folderPath ?? string.Empty);
+                        cmd.Parameters.AddWithValue("@folder_path", normalizedFolderPath);
                         cmd.Parameters.AddWithValue("@last_write_utc", lastWriteUtc.ToString("o"));
                         cmd.Parameters.AddWithValue("@file_size", fileSize);
                         cmd.ExecuteNonQuery();
@@ -48,6 +50,8 @@ ON CONFLICT(file_path) DO UPDATE SET
         public List<SQLiteFamilyRecord> SearchByFolder (string folderPath, string keyword)
         {
             var result = new List<SQLiteFamilyRecord>();
+
+            var normalizedFolderPath = NormalizeFolderPath(folderPath);
 
             using (var conn = new SQLiteConnection(_connectionString))
             {
@@ -62,7 +66,7 @@ WHERE folder_path = @folder_path
 ORDER BY file_name;";
 
                     var kw = keyword ?? string.Empty;
-                    cmd.Parameters.AddWithValue("@folder_path", folderPath ?? string.Empty);
+                    cmd.Parameters.AddWithValue("@folder_path", normalizedFolderPath);
                     cmd.Parameters.AddWithValue("@keyword", kw);
                     cmd.Parameters.AddWithValue("@keyword_like", "%" + kw + "%");
 
@@ -90,7 +94,7 @@ ORDER BY file_name;";
         {
             if (string.IsNullOrWhiteSpace(folderPath)) return 0;
 
-            var normalizedFolder = folderPath.ToLowerInvariant();
+            var normalizedFolder = NormalizeFolderPath(folderPath);
             var prefix = normalizedFolder + Path.DirectorySeparatorChar;
 
             lock (_writeLock)
@@ -118,6 +122,18 @@ WHERE folder_path = @folder_path
                     }
                 }
             }
+        }
+
+        private static string NormalizeFolderPath(string folderPath)
+        {
+            if (string.IsNullOrWhiteSpace(folderPath)) return string.Empty;
+
+            var normalized = folderPath
+                .Trim()
+                .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
+                .TrimEnd(SeparatorChars);
+
+            return normalized.ToLowerInvariant();
         }
     }
 }

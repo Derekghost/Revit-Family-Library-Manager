@@ -623,6 +623,12 @@ namespace RevitFamilyBrowser.ViewModels
                 return;
             }
 
+            var loadedFromIndex = LoadFolderCardsFromDatabase(dir);
+            if (loadedFromIndex > 0)
+            {
+                FamilyFilesView?.Refresh();
+                UpdateStatusText($"索引命中：已加载 {loadedFromIndex} 个文件，正在执行增量扫描... | 当前目录：{dir}");
+            }
             int myVersion = ++_scanVersion; // 版本号，确保异步结果不会覆盖后续的刷新
             CancellationToken token;
             int runId;
@@ -683,6 +689,30 @@ namespace RevitFamilyBrowser.ViewModels
             }, token);
         }
 
+        private int LoadFolderCardsFromDatabase(string dir)
+        {
+            if (_libraryRepository == null || string.IsNullOrWhiteSpace(dir)) return 0;
+
+            try
+            {
+                var records = _libraryRepository.SearchByFolder(dir, string.Empty);
+                if (records == null || records.Count == 0) return 0;
+
+                foreach (var record in records)
+                {
+                    if (record == null || string.IsNullOrWhiteSpace(record.FilePath)) continue;
+                    if (!File.Exists(record.FilePath)) continue;
+                    AddLocalFamilyCard(record.FilePath, skipDatabaseUpsert: true);
+                }
+
+                return FamilyFiles.Count;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[SQLite] Query by folder failed. Folder={dir}, Error={ex.Message}");
+                return 0;
+            }
+        }
         private IEnumerable<string> EnumerateRfaFiles(string rootDir, CancellationToken token, Action<string> onDirChanged)
         {
             var stack = new Stack<string>();
@@ -907,7 +937,7 @@ namespace RevitFamilyBrowser.ViewModels
             });
         }
 
-        private void AddLocalFamilyCard(string fullPath)
+        private void AddLocalFamilyCard(string fullPath,bool skipDatabaseUpsert = false)
         {
             var name = Path.GetFileNameWithoutExtension(fullPath);
             var vm = new FamilyThumbItemViewModel(fullPath, name)
@@ -927,7 +957,8 @@ namespace RevitFamilyBrowser.ViewModels
 
             FamilyFiles.Add(vm);
 
-            TryUpsertLocalFamily(fullPath, name);
+            if (!skipDatabaseUpsert)
+                TryUpsertLocalFamily(fullPath, name);
 
             ThumbnailQueue.Enqueue(fullPath, 256, img =>
             {
@@ -945,7 +976,7 @@ namespace RevitFamilyBrowser.ViewModels
                 {
                     var fileInfo = new FileInfo(fullPath);
                     var folder = fileInfo.DirectoryName ?? string.Empty;
-                    var lastWriteUtc = fileInfo.Exists ? fileInfo.LastAccessTimeUtc : DateTime.UtcNow;
+                    var lastWriteUtc = fileInfo.Exists ? fileInfo.LastWriteTimeUtc : DateTime.UtcNow;
                     var fileSize = fileInfo.Exists ? fileInfo.Length : 0L;
 
                     _libraryRepository.UpsertFamily(fullPath, familyName, folder, lastWriteUtc, fileSize);
