@@ -39,6 +39,9 @@ namespace RevitFamilyBrowser.ViewModels
         private CancellationTokenSource _localScanCancellation;
         private int _localScanRunId;
         private readonly SQLiteLibraryRepository _libraryRepository;
+        // 仅按“文件完整路径”去重，不按文件名去重：
+        // 同名族在不同项目目录（不同路径）需要同时展示。
+        private readonly HashSet<string> _localFamilyPathSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         private bool _isLocalScanInProgress;
         public bool IsLocalScanInProgress
@@ -364,6 +367,7 @@ namespace RevitFamilyBrowser.ViewModels
         private void SetRootPath(string rootPath)
         {
             CancelLocalScan("目录已变更，已取消上一次扫描");
+            _localFamilyPathSet.Clear();
             RootPath = rootPath;
 
             // 重置界面数据
@@ -642,7 +646,7 @@ namespace RevitFamilyBrowser.ViewModels
 
             UpdateStatusText($"正在扫描：已发现 0 个文件 | 当前目录：{dir}");
             IsLocalScanInProgress = true;
-            LocalScanProgressText = "正在扫描：一发现0个文件";
+            LocalScanProgressText = "正在扫描：已发现0个文件";
 
             const int batchSize = 100;
             var pendingBatch = new List<string>(batchSize);
@@ -939,6 +943,7 @@ namespace RevitFamilyBrowser.ViewModels
 
         private void AddLocalFamilyCard(string fullPath,bool skipDatabaseUpsert = false)
         {
+            if (!TryMarkLocalFamilySeenByPath(fullPath)) return;
             var name = Path.GetFileNameWithoutExtension(fullPath);
             var vm = new FamilyThumbItemViewModel(fullPath, name)
             {
@@ -964,6 +969,32 @@ namespace RevitFamilyBrowser.ViewModels
             {
                 if (img != null) vm.Thumbnail = img;
             });
+        }
+
+        private bool TryMarkLocalFamilySeenByPath(string fullPath)
+        {
+            var dedupeKey = BuildLocalFamilyPathKey(fullPath);
+            if (string.IsNullOrWhiteSpace(dedupeKey)) return false;
+            return _localFamilyPathSet.Add(dedupeKey);
+        }
+
+        private static string BuildLocalFamilyPathKey(string fullPath)
+        {
+            if (string.IsNullOrWhiteSpace(fullPath)) return null;
+
+            var key = fullPath.Trim();
+            try
+            {
+                key = Path.GetFullPath(key);
+            }
+            catch
+            {
+                // 路径不规范时退化使用原始值，仍然参与去重
+            }
+
+            return key
+                .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
+                .TrimEnd(Path.DirectorySeparatorChar);
         }
 
         private void TryUpsertLocalFamily(string fullPath, string familyName)
