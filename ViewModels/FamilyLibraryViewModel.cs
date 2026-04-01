@@ -489,6 +489,7 @@ namespace RevitFamilyBrowser.ViewModels
         private void RefreshFamilyFiles()
         {
             CancelLocalScan("视图已切换，已取消上一次扫描");
+            _localFamilyPathSet.Clear();
             FamilyFiles.Clear();
             SelectedFamily = null;
             IsDetailsPaneOpen = false;
@@ -652,14 +653,33 @@ namespace RevitFamilyBrowser.ViewModels
             var pendingBatch = new List<string>(batchSize);
             var discoveredCount = 0;
             var currentDir = dir;
+            var existingRecords = new Dictionary<string, SQLiteFamilyRecord>(StringComparer.OrdinalIgnoreCase);
+            if (_libraryRepository != null)
+            {
+                try
+                {
+                    existingRecords = _libraryRepository.GetRecordsByFolderScope(dir, includeSubfolders: true);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[SQLite] Load scope records failed. Folder={dir}, Error={ex.Message}");
+                }
+            }
 
             Task.Run(() =>
             {
+                var seenFilePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var addedCount = 0;
+                var updatedCount = 0;
+                var skippedCount = 0;
+                var deletedCount = 0;
+
                 try
                 {
                     foreach (var file in EnumerateRfaFiles(dir, token, d => currentDir = d))
                     {
                         token.ThrowIfCancellationRequested();
+                        TrackAndSyncScannedFile(file, existingRecords, seenFilePaths, ref addedCount, ref updatedCount, ref skippedCount);
                         pendingBatch.Add(file);
                         discoveredCount++;
 
@@ -675,12 +695,24 @@ namespace RevitFamilyBrowser.ViewModels
                     {
                         var batch = pendingBatch.ToArray();
                         pendingBatch.Clear();
-                        ScheduleScanUiUpdate(myVersion, runId, token, batch, discoveredCount, currentDir, true);
+                        ScheduleScanUiUpdate(myVersion, runId, token, batch, discoveredCount, currentDir, false);
                     }
-                    else
+                    if (_libraryRepository != null)
                     {
-                        ScheduleScanUiStatus(myVersion, runId, token, $"扫描完成：共发现 {discoveredCount} 个文件 | 当前目录：{currentDir}");
+                        try
+                        {
+                            deletedCount = _libraryRepository.DeleteMissingInFolderScope(dir, seenFilePaths);
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"[SQLite] Cleanup stale records failed. Folder={dir}, Error={ex.Message}");
+                        }
                     }
+                    ScheduleScanUiStatus(
+                        myVersion,
+                        runId,
+                        token,
+                        $"扫描完成：共发现 {discoveredCount} 个文件 | 新增 {addedCount}、更新 {updatedCount}、删除 {deletedCount}、跳过 {skippedCount} | 当前目录：{currentDir}");
                 }
                 catch (OperationCanceledException)
                 {
@@ -767,7 +799,7 @@ namespace RevitFamilyBrowser.ViewModels
                 if (!IsScanStillValid(scanVersion, runId, token)) return;
 
                 foreach (var file in files)
-                    AddLocalFamilyCard(file);
+                    AddLocalFamilyCard(file, skipDatabaseUpsert: true);
 
                 FamilyFilesView?.Refresh();
                 var tail = isFinalBatch ? " | 扫描完成" : "";
@@ -1017,6 +1049,89 @@ namespace RevitFamilyBrowser.ViewModels
                     Debug.WriteLine($"[SQLite] Upsert failed. File={fullPath}, Error={ex.Message}");
                 }
             });
+        }
+
+        private void TrackAndSyncScannedFile(
+            string fullPath,
+            Dictionary<string, SQLiteFamilyRecord> existingRecords,
+            HashSet<string> seenFilePaths,
+            ref int addedCount,
+            ref int updatedCount,
+            ref int skippedCount)
+        {
+            if (_libraryRepository == null || string.IsNullOrWhiteSpace(fullPath))
+            {
+                skippedCount++;
+                return;
+            }
+
+            var normalizedPath = BuildLocalFamilyPathKey(fullPath);
+            if (string.IsNullOrWhiteSpace(normalizedPath))
+            {
+                skippedCount++;
+                return;
+            }
+
+            seenFilePaths.Add(normalizedPath);
+
+            FileInfo fileInfo;
+            try
+            {
+                fileInfo = new FileInfo(fullPath);
+            }
+            catch
+            {
+                skippedCount++;
+                return;
+            }
+
+            if (!fileInfo.Exists)
+            {
+                skippedCount++;
+                return;
+            }
+
+            var currentLastWriteUtc = fileInfo.LastWriteTimeUtc;
+            var currentFileSize = fileInfo.Length;
+
+            SQLiteFamilyRecord existing = null;
+            var hasExisting = existingRecords != null && existingRecords.TryGetValue(normalizedPath, out existing);
+            var unchanged = hasExisting && IsRecordUnchanged(existing, currentLastWriteUtc, currentFileSize);
+            if (unchanged)
+            {
+                skippedCount++;
+                return; 
+            }
+
+            try
+            {
+                _libraryRepository.UpsertFamily(
+                    fullPath,
+                    Path.GetFileNameWithoutExtension(fullPath),
+                    fileInfo.DirectoryName ?? string.Empty,
+                    currentLastWriteUtc,
+                    currentFileSize);
+
+                if (hasExisting) updatedCount++;
+                else addedCount++;
+            }
+            catch (Exception ex)
+            {
+                skippedCount++;
+                Debug.WriteLine($"[SQLite] Incremental upsert failed. File={fullPath}, Error={ex.Message}");
+            }
+        }
+
+        private static bool IsRecordUnchanged(SQLiteFamilyRecord existing, DateTime lastWriteUtc, long fileSize)
+        {
+            if (existing == null) return false;
+
+            long existingFileSize;
+            if (!long.TryParse(existing.FileSize, out existingFileSize))
+                return false;
+
+            var timetamp = lastWriteUtc.ToString("o");
+            return existingFileSize == fileSize && string.Equals(existing.LastWriteUtc, timetamp, StringComparison.Ordinal);
         }
 
         private void ReadSelectedFamilyParameters(FamilyThumbItemViewModel item)
